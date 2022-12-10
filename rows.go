@@ -15,6 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// This file is a copy of the original file from the clickhouse-go project.
+// The original file can be found here:
+// https://github.com/ClickHouse/clickhouse-go/blob/226a902d120aa46e3883fbf6a5a2667dfb9e90d2/clickhouse_rows.go
+
 package mockhouse
 
 import (

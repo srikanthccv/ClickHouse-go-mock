@@ -63,9 +63,6 @@ type ClickConnMockCommon interface {
 
 	// ExpectPing expects *driver.Conn.Ping to be called.
 	// the *ExpectedPing allows to mock database response
-	//
-	// You must enable pings using MonitorPingsOption for this to register
-	// any expectations.
 	ExpectPing() *ExpectedPing
 
 	// ExpectAsyncInsert expects *driver.Conn.AsyncInsert to be called.
@@ -138,24 +135,11 @@ type clickhousemock struct {
 	expected []expectation
 }
 
-func (c *clickhousemock) open(options *clickhouse.Options) (*clickhouse.Conn, *clickhousemock, error) {
-	db, err := clickhouse.Open(options)
-	if err != nil {
-		return &db, c, err
-	}
+func (c *clickhousemock) open(options *clickhouse.Options) (*clickhousemock, error) {
 	if c.queryMatcher == nil {
 		c.queryMatcher = sqlmock.QueryMatcherRegexp
 	}
-
-	if c.monitorPings {
-		// We call Ping on the driver shortly to verify startup assertions by
-		// driving internal behaviour of the sql standard library. We don't
-		// want this call to ping to be monitored for expectation purposes so
-		// temporarily disable.
-		c.monitorPings = false
-		defer func() { c.monitorPings = true }()
-	}
-	return &db, c, db.Ping(context.Background())
+	return c, nil
 }
 
 func (c *clickhousemock) queryMatcherFunc() sqlmock.QueryMatcher {
@@ -580,7 +564,7 @@ func (c *clickhousemock) ExpectQuery(expectedSQL string) *ExpectedQuery {
 
 // Query meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Query(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-	ex, err := c.query(ctx, query)
+	ex, err := c.query(ctx, query, args...)
 	if ex != nil {
 		select {
 		case <-time.After(ex.delay):
@@ -595,7 +579,7 @@ func (c *clickhousemock) Query(ctx context.Context, query string, args ...interf
 	return nil, err
 }
 
-func (c *clickhousemock) query(ctx context.Context, query string) (*ExpectedQuery, error) {
+func (c *clickhousemock) query(ctx context.Context, query string, args ...interface{}) (*ExpectedQuery, error) {
 	var expected *ExpectedQuery
 	var fulfilled int
 	var ok bool
@@ -636,6 +620,10 @@ func (c *clickhousemock) query(ctx context.Context, query string) (*ExpectedQuer
 	defer expected.Unlock()
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("Query: %v", err)
+	}
+
+	if err := expected.matchArgs(args); err != nil {
+		return nil, fmt.Errorf("Query: '%s' arguments do not match: %s", query, err)
 	}
 
 	expected.triggered = true

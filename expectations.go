@@ -14,6 +14,7 @@ package mockhouse
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -189,6 +190,38 @@ type queryBasedExpectation struct {
 	commonExpectation
 	expectSQL string
 	args      []interface{}
+}
+
+func (e *queryBasedExpectation) matchArgs(args []interface{}) error {
+	if len(e.args) == 0 && len(args) == 0 {
+		return nil
+	}
+
+	if len(e.args) != len(args) {
+		return fmt.Errorf("expected %d arguments, got %d", len(e.args), len(args))
+	}
+
+	for i, arg := range e.args {
+		if err := matchArg(arg, args[i]); err != nil {
+			return fmt.Errorf("argument %d: %s", i, err)
+		}
+	}
+
+	return nil
+}
+
+func matchArg(expected, actual interface{}) error {
+	if expected == nil {
+		return nil
+	}
+
+	if expected == actual {
+		return nil
+	}
+	if reflect.DeepEqual(expected, actual) {
+		return nil
+	}
+	return fmt.Errorf("expected %v, got %v", expected, actual)
 }
 
 // ExpectedPing is used to manage *driver.Conn.Ping expectations.

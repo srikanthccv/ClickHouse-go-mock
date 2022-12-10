@@ -26,7 +26,6 @@ type mockClickHouseDriver struct {
 	sync.Mutex
 	counter int
 	conns   map[string]*clickhousemock
-	dsn     string
 }
 
 func init() {
@@ -35,21 +34,8 @@ func init() {
 	}
 }
 
-func (d *mockClickHouseDriver) Open(dsn string) (clickhouse.Conn, error) {
-	d.Lock()
-	defer d.Unlock()
-
-	c, ok := d.conns[dsn]
-	if !ok {
-		return c, fmt.Errorf("expected a connection to be available, but it is not")
-	}
-
-	c.opened++
-	return c, nil
-}
-
-// NewClickHouseNative creates clickhousemock database connection and a mock to manage expectations.
-func NewClickHouseNative(options ...func(*clickhousemock) error) (*clickhousemock, error) {
+// NewClickHouseNative creates clickhousemock database mock to manage expectations.
+func NewClickHouseNative(options *clickhouse.Options) (*clickhousemock, error) {
 	clickHousePool.Lock()
 	dsn := fmt.Sprintf("clickhousemock_db_%d", clickHousePool.counter)
 	clickHousePool.counter++
@@ -58,13 +44,5 @@ func NewClickHouseNative(options ...func(*clickhousemock) error) (*clickhousemoc
 	clickHousePool.conns[dsn] = cmock
 	clickHousePool.Unlock()
 
-	for _, opt := range options {
-		if err := opt(cmock); err != nil {
-			return nil, err
-		}
-	}
-
-	cmock.open(nil)
-
-	return cmock, nil
+	return cmock.open(options)
 }
