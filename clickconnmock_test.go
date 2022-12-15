@@ -15,6 +15,8 @@ package mockhouse
 import (
 	"context"
 	"testing"
+
+	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
 )
 
 func TestPrepareExpectations(t *testing.T) {
@@ -73,6 +75,70 @@ func TestQueryExepectationsWithArgs(t *testing.T) {
 	_, err = mock.Query(context.Background(), "SELECT id, title, content FROM articles WHERE id = ?", 1)
 	if err != nil {
 		t.Errorf("an error '%s' was not expected when querying a statement", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestQueryExepectationsWithArgsAndRows(t *testing.T) {
+	t.Parallel()
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	cols := make(map[string]column.Type)
+	cols["id"] = "Int32"
+	cols["title"] = "String"
+	cols["content"] = "String"
+
+	values := make([][]interface{}, 1)
+	values[0] = make([]interface{}, 3)
+	values[0][0] = int32(1)
+	values[0][1] = "title"
+	values[0][2] = "content"
+
+	rows := NewRows(cols, values)
+
+	mock.
+		ExpectQuery("SELECT id, title, content FROM articles WHERE id = ?").
+		WithArgs(1).
+		WillReturnRows(rows)
+
+	returnRows, err := mock.Query(context.Background(), "SELECT id, title, content FROM articles WHERE id = ?", 1)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when querying a statement", err)
+	}
+
+	cnt := 0
+	for returnRows.Next() {
+		var id int32
+		var title string
+		var content string
+		err = returnRows.Scan(&id, &title, &content)
+		if err != nil {
+			t.Errorf("an error '%s' was not expected when scanning a row", err)
+		}
+
+		if id != 1 {
+			t.Errorf("expected id to be 1, but got %d", id)
+		}
+
+		if title != "title" {
+			t.Errorf("expected title to be title, but got %s", title)
+		}
+
+		if content != "content" {
+			t.Errorf("expected content to be content, but got %s", content)
+		}
+		cnt++
+
+		if cnt > 2 {
+			t.Errorf("expected only 1 row, but got more")
+			break
+		}
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

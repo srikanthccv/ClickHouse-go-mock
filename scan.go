@@ -36,7 +36,7 @@ func scan(block *proto.Block, row int, dest ...interface{}) error {
 		}
 	}
 	for i, d := range dest {
-		if err := columns[i].ScanRow(d, row-1); err != nil {
+		if err := columns[i].ScanRow(d, row); err != nil {
 			return &OpError{
 				Err:        err,
 				ColumnName: block.ColumnsNames()[i],

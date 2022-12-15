@@ -113,3 +113,7 @@ func structIdx(t reflect.Type) map[string][]int {
 	}
 	return fields
 }
+
+func newStructMap() *structMap {
+	return &structMap{}
+}

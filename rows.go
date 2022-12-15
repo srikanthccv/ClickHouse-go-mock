@@ -25,106 +25,75 @@ import (
 	"database/sql"
 	"io"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 )
 
 type Rows struct {
-	err       error
-	row       int
 	block     *proto.Block
-	totals    *proto.Block
-	errors    chan error
-	stream    chan *proto.Block
-	columns   []string
 	structMap *structMap
+	colNames  []string
+	colTypes  []driver.ColumnType
+	values    [][]interface{}
+	pos       int
+	nextErr   map[int]error
+	closeErr  error
 }
 
 func (r *Rows) Next() (result bool) {
-	defer func() {
-		if !result {
-			r.Close()
-		}
-	}()
-	if r.block == nil {
+	if r.pos >= len(r.values) {
 		return false
 	}
-next:
-	if r.row >= r.block.Rows() {
-		select {
-		case err := <-r.errors:
-			if err != nil {
-				r.err = err
-				return false
-			}
-			goto next
-		case block := <-r.stream:
-			if block == nil {
-				return false
-			}
-			if block.Packet == proto.ServerTotals {
-				r.row, r.block, r.totals = 0, nil, block
-				return false
-			}
-			r.row, r.block = 0, block
-		}
-	}
-	r.row++
-	return r.row <= r.block.Rows()
+	return true
 }
 
 func (r *Rows) Scan(dest ...interface{}) error {
-	if r.block == nil || (r.row == 0 && r.row >= r.block.Rows()) { // call without next when result is empty
+	if r.pos >= len(r.values) {
 		return io.EOF
 	}
-	return scan(r.block, r.row, dest...)
+	if err := scan(r.block, r.pos, dest...); err != nil {
+		return err
+	}
+	if err := r.nextErr[r.pos]; err != nil {
+		return err
+	}
+	r.pos++
+	return nil
 }
 
 func (r *Rows) ScanStruct(dest interface{}) error {
-	values, err := r.structMap.Map("ScanStruct", r.columns, dest, true)
-	if err != nil {
+	if r.pos >= len(r.values) {
+		return io.EOF
+	}
+	if err := scan(r.block, r.pos, r.structMap, dest); err != nil {
 		return err
 	}
-	return r.Scan(values...)
+	if err := r.nextErr[r.pos]; err != nil {
+		return err
+	}
+	r.pos++
+	return nil
 }
 
 func (r *Rows) Totals(dest ...interface{}) error {
-	if r.totals == nil {
-		return sql.ErrNoRows
-	}
-	return scan(r.totals, 1, dest...)
+	return nil
 }
 
 func (r *Rows) Columns() []string {
-	return r.columns
+	return r.colNames
+}
+
+func (r *Rows) ColumnTypes() []driver.ColumnType {
+	return r.colTypes
 }
 
 func (r *Rows) Close() error {
-	active := 2
-	for {
-		select {
-		case _, ok := <-r.stream:
-			if !ok {
-				active--
-				if active == 0 {
-					return r.err
-				}
-			}
-		case err, ok := <-r.errors:
-			if err != nil {
-				r.err = err
-			}
-			if !ok {
-				active--
-				if active == 0 {
-					return r.err
-				}
-			}
-		}
-	}
+	return r.closeErr
 }
 
 func (r *Rows) Err() error {
-	return r.err
+	return nil
 }
 
 type Row struct {
@@ -140,11 +109,17 @@ func (r *Row) ScanStruct(dest interface{}) error {
 	if r.err != nil {
 		return r.err
 	}
-	values, err := r.rows.structMap.Map("ScanStruct", r.rows.columns, dest, true)
-	if err != nil {
+	if !r.rows.Next() {
+		r.rows.Close()
+		if err := r.rows.Err(); err != nil {
+			return err
+		}
+		return sql.ErrNoRows
+	}
+	if err := r.rows.ScanStruct(dest); err != nil {
 		return err
 	}
-	return r.Scan(values...)
+	return r.rows.Close()
 }
 
 func (r *Row) Scan(dest ...interface{}) error {
@@ -162,4 +137,32 @@ func (r *Row) Scan(dest ...interface{}) error {
 		return err
 	}
 	return r.rows.Close()
+}
+
+func NewRows(columns map[string]column.Type, values [][]interface{}) *Rows {
+	colNames := make([]string, 0, len(columns))
+	colTypes := make([]driver.ColumnType, 0, len(columns))
+	for name := range columns {
+		colNames = append(colNames, name)
+	}
+	block := &proto.Block{}
+	for name, typ := range columns {
+		err := block.AddColumn(name, typ)
+		if err != nil {
+			panic(err)
+		}
+	}
+	for _, row := range values {
+		err := block.Append(row...)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return &Rows{
+		block:     block,
+		structMap: newStructMap(),
+		colNames:  colNames,
+		colTypes:  colTypes,
+		values:    values,
+	}
 }
