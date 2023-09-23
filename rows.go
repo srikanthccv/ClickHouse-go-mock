@@ -212,7 +212,7 @@ func getReflectType(typ string) reflect.Type {
 
 type ColumnType struct {
 	Name string
-	Type string
+	Type column.Type
 }
 
 func NewRows(columns []ColumnType, values [][]interface{}) *Rows {
@@ -225,7 +225,7 @@ func NewRows(columns []ColumnType, values [][]interface{}) *Rows {
 	}
 	block := &proto.Block{}
 	for _, col := range columns {
-		err := block.AddColumn(col.Name, column.Type(col.Type))
+		err := block.AddColumn(col.Name, col.Type)
 		if err != nil {
 			panic(err)
 		}
