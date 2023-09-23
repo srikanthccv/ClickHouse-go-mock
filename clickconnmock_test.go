@@ -14,6 +14,7 @@ package mockhouse
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
@@ -53,7 +54,7 @@ func TestQueryExpectations(t *testing.T) {
 		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
 	}
 
-	mock.ExpectQuery("SELECT id, title, content FROM articles WHERE id = ?")
+	mock.ExpectQuery("SELECT id, title, content FROM articles WHERE id = ?").WithArgs(1)
 	_, err = mock.Query(context.Background(), "SELECT id, title, content FROM articles WHERE id = ?", 1)
 	if err != nil {
 		t.Errorf("an error '%s' was not expected when querying a statement", err)
@@ -133,6 +134,77 @@ func TestQueryExepectationsWithArgsAndRows(t *testing.T) {
 		if content != "content" {
 			t.Errorf("expected content to be content, but got %s", content)
 		}
+		cnt++
+
+		if cnt > 2 {
+			t.Errorf("expected only 1 row, but got more")
+			break
+		}
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestQueryExepectationsWithArgsAndRowsColumnTypes(t *testing.T) {
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	cols := make(map[string]column.Type)
+	cols["id"] = "Int32"
+	cols["title"] = "String"
+
+	values := make([][]interface{}, 1)
+	values[0] = make([]interface{}, 2)
+	values[0][0] = int32(1)
+	values[0][1] = "title"
+
+	rows := NewRows(cols, values)
+
+	mock.
+		ExpectQuery("SELECT id, title FROM articles WHERE id = ?").
+		WithArgs(1).
+		WillReturnRows(rows)
+
+	returnRows, err := mock.Query(context.Background(), "SELECT id, title FROM articles WHERE id = ?", 1)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when querying a statement", err)
+	}
+
+	cnt := 0
+	var (
+		columnTypes = rows.ColumnTypes()
+		vars        = make([]any, len(columnTypes))
+	)
+	for i := range columnTypes {
+		vars[i] = reflect.New(columnTypes[i].ScanType()).Interface()
+	}
+	for returnRows.Next() {
+		var id int32
+		var title string
+		if err := rows.Scan(vars...); err != nil {
+			t.Errorf("an error '%s' was not expected when scanning a row", err)
+		}
+		for _, v := range vars {
+			switch v := v.(type) {
+			case *int32:
+				id = *v
+			case *string:
+				title = *v
+			}
+		}
+
+		if id != 1 {
+			t.Errorf("expected id to be 1, but got %d", id)
+		}
+
+		if title != "title" {
+			t.Errorf("expected title to be title, but got %s", title)
+		}
+
 		cnt++
 
 		if cnt > 2 {

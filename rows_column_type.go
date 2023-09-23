@@ -23,6 +23,8 @@ package mockhouse
 
 import (
 	"reflect"
+
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
 type columnType struct {
@@ -32,18 +34,27 @@ type columnType struct {
 	scanType reflect.Type
 }
 
-func (c *columnType) Name() string {
+func NewColumnType(name, chType string, nullable bool, scanType reflect.Type) driver.ColumnType {
+	return columnType{
+		name:     name,
+		chType:   chType,
+		nullable: nullable,
+		scanType: scanType,
+	}
+}
+
+func (c columnType) Name() string {
 	return c.name
 }
 
-func (c *columnType) Nullable() bool {
+func (c columnType) Nullable() bool {
 	return c.nullable
 }
 
-func (c *columnType) ScanType() reflect.Type {
+func (c columnType) ScanType() reflect.Type {
 	return c.scanType
 }
 
-func (c *columnType) DatabaseTypeName() string {
+func (c columnType) DatabaseTypeName() string {
 	return c.chType
 }

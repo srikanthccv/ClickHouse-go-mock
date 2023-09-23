@@ -49,7 +49,7 @@ func (b *batch) AppendStruct(v interface{}) error {
 }
 
 func (b *batch) Column(int) driver.BatchColumn {
-	return batchcolumn{}
+	return batchcolumn{conn: b.conn, ex: b.ex, query: b.query}
 }
 
 func (b *batch) Flush() error {
@@ -62,4 +62,8 @@ func (b *batch) Send() error {
 
 func (b *batch) IsSent() bool {
 	return b.ex.mustBeSent
+}
+
+func (b *batch) Rows() int {
+	return b.ex.rows
 }

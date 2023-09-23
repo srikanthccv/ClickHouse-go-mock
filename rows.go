@@ -24,6 +24,7 @@ package mockhouse
 import (
 	"database/sql"
 	"io"
+	"reflect"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -41,11 +42,8 @@ type Rows struct {
 	closeErr  error
 }
 
-func (r *Rows) Next() (result bool) {
-	if r.pos >= len(r.values) {
-		return false
-	}
-	return true
+func (r *Rows) Next() bool {
+	return r.pos < len(r.values)
 }
 
 func (r *Rows) Scan(dest ...interface{}) error {
@@ -139,11 +137,86 @@ func (r *Row) Scan(dest ...interface{}) error {
 	return r.rows.Close()
 }
 
+func getReflectType(typ string) reflect.Type {
+	var reflectType reflect.Type
+	switch typ {
+	case "Int8":
+		reflectType = reflect.TypeOf(int8(0))
+	case "Int16":
+		reflectType = reflect.TypeOf(int16(0))
+	case "Int32":
+		reflectType = reflect.TypeOf(int32(0))
+	case "Int64":
+		reflectType = reflect.TypeOf(int64(0))
+	case "UInt8":
+		reflectType = reflect.TypeOf(uint8(0))
+	case "UInt16":
+		reflectType = reflect.TypeOf(uint16(0))
+	case "UInt32":
+		reflectType = reflect.TypeOf(uint32(0))
+	case "UInt64":
+		reflectType = reflect.TypeOf(uint64(0))
+	case "Float32":
+		reflectType = reflect.TypeOf(float32(0))
+	case "Float64":
+		reflectType = reflect.TypeOf(float64(0))
+	case "String":
+		reflectType = reflect.TypeOf(string(""))
+	case "FixedString":
+		reflectType = reflect.TypeOf(string(""))
+	case "Date":
+		reflectType = reflect.TypeOf(string(""))
+	case "DateTime":
+		reflectType = reflect.TypeOf(string(""))
+	case "UUID":
+		reflectType = reflect.TypeOf(string(""))
+	case "IPv4":
+		reflectType = reflect.TypeOf(string(""))
+	case "IPv6":
+		reflectType = reflect.TypeOf(string(""))
+	case "Array":
+		reflectType = reflect.TypeOf([]interface{}{})
+	case "Tuple":
+		reflectType = reflect.TypeOf([]interface{}{})
+	case "Nullable":
+		reflectType = reflect.TypeOf(interface{}(nil))
+	case "Nothing":
+		reflectType = reflect.TypeOf(interface{}(nil))
+	case "Enum8":
+		reflectType = reflect.TypeOf(int8(0))
+	case "Enum16":
+		reflectType = reflect.TypeOf(int16(0))
+	case "LowCardinality":
+		reflectType = reflect.TypeOf(string(""))
+	case "Decimal":
+		reflectType = reflect.TypeOf(string(""))
+	case "Decimal32":
+		reflectType = reflect.TypeOf(int32(0))
+	case "Decimal64":
+		reflectType = reflect.TypeOf(int64(0))
+	case "Decimal128":
+		reflectType = reflect.TypeOf(string(""))
+	case "Decimal256":
+		reflectType = reflect.TypeOf(string(""))
+	case "AggregateFunction":
+		reflectType = reflect.TypeOf(string(""))
+	case "Nested":
+		reflectType = reflect.TypeOf(string(""))
+	case "SimpleAggregateFunction":
+		reflectType = reflect.TypeOf(string(""))
+	case "TupleElement":
+		reflectType = reflect.TypeOf(string(""))
+	}
+	return reflectType
+}
+
 func NewRows(columns map[string]column.Type, values [][]interface{}) *Rows {
 	colNames := make([]string, 0, len(columns))
 	colTypes := make([]driver.ColumnType, 0, len(columns))
-	for name := range columns {
+	for name, typ := range columns {
 		colNames = append(colNames, name)
+		reflectType := getReflectType(string(typ))
+		colTypes = append(colTypes, NewColumnType(name, string(typ), false, reflectType))
 	}
 	block := &proto.Block{}
 	for name, typ := range columns {

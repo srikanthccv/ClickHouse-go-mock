@@ -108,7 +108,7 @@ type ClickConnMockCommon interface {
 	// MatchExpectationsInOrder gives an option whether to match all
 	// expectations in the order they were set or not.
 	//
-	// By default it is set to - true. But if you use goroutines
+	// By default it is set to true. But if you use goroutines
 	// to parallelize your query executation, that option may
 	// be handy.
 	//
@@ -297,16 +297,17 @@ func (c *clickhousemock) ExpectPing() *ExpectedPing {
 	return e
 }
 
-func (c *clickhousemock) ExpectAsyncInsert(expectedSQL string) *ExpectedAsyncInsert {
+func (c *clickhousemock) ExpectAsyncInsert(expectedSQL string, expectedWait bool) *ExpectedAsyncInsert {
 	e := &ExpectedAsyncInsert{}
 	e.expectSQL = expectedSQL
+	e.expectWait = expectedWait
 	c.expected = append(c.expected, e)
 	return e
 }
 
 // AsyncInsert meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool) error {
-	ex, err := c.asyncInsert(ctx, query)
+	ex, err := c.asyncInsert(ctx, query, wait)
 	if ex != nil {
 		select {
 		case <-time.After(ex.delay):
@@ -318,7 +319,7 @@ func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait boo
 	return err
 }
 
-func (c *clickhousemock) asyncInsert(ctx context.Context, query string) (*ExpectedAsyncInsert, error) {
+func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait bool) (*ExpectedAsyncInsert, error) {
 	var expected *ExpectedAsyncInsert
 	var fulfilled int
 	var ok bool

@@ -267,41 +267,13 @@ type ExpectedPrepareBatch struct {
 	mustBeSent      bool
 	wasClosed       bool
 	delay           time.Duration
+	rows            int
+	isSent          bool
 }
 
 // WillReturnError allows to set an error for the expected *driver.Conn.PrepareBatch action.
 func (e *ExpectedPrepareBatch) WillReturnError(err error) *ExpectedPrepareBatch {
 	e.err = err
-	return e
-}
-
-// WillReturnAbortError allows to set an error for this prepared batch statement Abort action
-func (e *ExpectedPrepareBatch) WillReturnAbortError(err error) *ExpectedPrepareBatch {
-	e.abortErr = err
-	return e
-}
-
-// WillReturnAppendError allows to set an error for this prepared batch statement Append action
-func (e *ExpectedPrepareBatch) WillReturnAppendError(err error) *ExpectedPrepareBatch {
-	e.appendErr = err
-	return e
-}
-
-// WillReturnAppendStructError allows to set an error for this prepared batch statement AppendStruct action
-func (e *ExpectedPrepareBatch) WillReturnAppendStructError(err error) *ExpectedPrepareBatch {
-	e.appendStructErr = err
-	return e
-}
-
-// WillReturnFlushError allows to set an error for this prepared batch statement Flush action
-func (e *ExpectedPrepareBatch) WillReturnFlushError(err error) *ExpectedPrepareBatch {
-	e.flushErr = err
-	return e
-}
-
-// WillReturnSendError allows to set an error for this prepared batch statement Send action
-func (e *ExpectedPrepareBatch) WillReturnSendError(err error) *ExpectedPrepareBatch {
-	e.sendErr = err
 	return e
 }
 
@@ -319,13 +291,22 @@ func (e *ExpectedPrepareBatch) WillBeSent() *ExpectedPrepareBatch {
 	return e
 }
 
+// WillReturnRows expects this prepared batch statement to
+// be set with rows.
+func (e *ExpectedPrepareBatch) WillReturnRows(rows int) *ExpectedPrepareBatch {
+	e.rows = rows
+	return e
+}
+
 type ExpectedAbort struct {
 	commonExpectation
+	expBatch  *ExpectedPrepareBatch
 	expectSQL string
 }
 
 // WillReturnError allows to set an error for the expected *batch.Abort action.
 func (e *ExpectedAbort) WillReturnError(err error) *ExpectedAbort {
+	e.expBatch.abortErr = err
 	e.err = err
 	return e
 }
@@ -338,18 +319,21 @@ func (e *ExpectedAbort) String() string {
 func (e *ExpectedPrepareBatch) ExpectAbort() *ExpectedAbort {
 	eq := &ExpectedAbort{}
 	eq.expectSQL = e.expectSQL
+	eq.expBatch = e
 	e.expected = append(e.expected, eq)
 	return eq
 }
 
 type ExpectedAppend struct {
 	commonExpectation
+	expBatch  *ExpectedPrepareBatch
 	expectSQL string
 }
 
 // WillReturnError allows to set an error for the expected *batch.Append action.
 func (e *ExpectedAppend) WillReturnError(err error) *ExpectedAppend {
 	e.err = err
+	e.expBatch.appendErr = err
 	return e
 }
 
@@ -362,18 +346,21 @@ func (e *ExpectedAppend) String() string {
 func (e *ExpectedPrepareBatch) ExpectAppend() *ExpectedAppend {
 	eq := &ExpectedAppend{}
 	eq.expectSQL = e.expectSQL
+	eq.expBatch = e
 	e.expected = append(e.expected, eq)
 	return eq
 }
 
 type ExpectedAppendStruct struct {
 	commonExpectation
+	expBatch  *ExpectedPrepareBatch
 	expectSQL string
 }
 
 // WillReturnError allows to set an error for the expected *batch.AppendStruct action.
 func (e *ExpectedAppendStruct) WillReturnError(err error) *ExpectedAppendStruct {
 	e.err = err
+	e.expBatch.appendStructErr = err
 	return e
 }
 
@@ -385,6 +372,7 @@ func (e *ExpectedAppendStruct) String() string {
 func (e *ExpectedPrepareBatch) ExpectAppendStruct() *ExpectedAppendStruct {
 	eq := &ExpectedAppendStruct{}
 	eq.expectSQL = e.expectSQL
+	eq.expBatch = e
 	e.expected = append(e.expected, eq)
 	return eq
 }
@@ -392,6 +380,7 @@ func (e *ExpectedPrepareBatch) ExpectAppendStruct() *ExpectedAppendStruct {
 type ExpectedColumn struct {
 	commonExpectation
 	expectSQL   string
+	expBatch    *ExpectedPrepareBatch
 	batchCoulmn clikhouseDriver.BatchColumn
 }
 
@@ -409,18 +398,21 @@ func (e *ExpectedColumn) String() string {
 func (e *ExpectedPrepareBatch) ExpectColumn() *ExpectedColumn {
 	eq := &ExpectedColumn{}
 	eq.expectSQL = e.expectSQL
+	eq.expBatch = e
 	e.expected = append(e.expected, eq)
 	return eq
 }
 
 type ExpectedFlush struct {
 	commonExpectation
+	expBatch  *ExpectedPrepareBatch
 	expectSQL string
 }
 
 // WillReturnError allows to set an error for the expected *batch.Flush action.
 func (e *ExpectedFlush) WillReturnError(err error) *ExpectedFlush {
 	e.err = err
+	e.expBatch.flushErr = err
 	return e
 }
 
@@ -432,18 +424,21 @@ func (e *ExpectedFlush) String() string {
 func (e *ExpectedPrepareBatch) ExpectFlush() *ExpectedFlush {
 	eq := &ExpectedFlush{}
 	eq.expectSQL = e.expectSQL
+	eq.expBatch = e
 	e.expected = append(e.expected, eq)
 	return eq
 }
 
 type ExpectedSend struct {
 	commonExpectation
+	expBatch  *ExpectedPrepareBatch
 	expectSQL string
 }
 
 // WillReturnError allows to set an error for the expected *batch.Send action.
 func (e *ExpectedSend) WillReturnError(err error) *ExpectedSend {
 	e.err = err
+	e.expBatch.sendErr = err
 	return e
 }
 
@@ -455,6 +450,7 @@ func (e *ExpectedSend) String() string {
 func (e *ExpectedPrepareBatch) ExpectSend() *ExpectedSend {
 	eq := &ExpectedSend{}
 	eq.expectSQL = e.expectSQL
+	eq.expBatch = e
 	e.expected = append(e.expected, eq)
 	return eq
 }
@@ -462,12 +458,15 @@ func (e *ExpectedPrepareBatch) ExpectSend() *ExpectedSend {
 type ExpectedIsSent struct {
 	commonExpectation
 	expectSQL string
+	expBatch  *ExpectedPrepareBatch
 	isSent    bool
 }
 
 // WillReturnBool allows to set an bool for the expected *batch.IsSent action.
 func (e *ExpectedIsSent) WillReturnBool(b bool) *ExpectedIsSent {
 	e.isSent = b
+	e.expBatch.isSent = b
+	e.expBatch.mustBeSent = b
 	return e
 }
 
@@ -479,6 +478,7 @@ func (e *ExpectedIsSent) String() string {
 func (e *ExpectedPrepareBatch) ExpectIsSent() *ExpectedIsSent {
 	eq := &ExpectedIsSent{}
 	eq.expectSQL = e.expectSQL
+	eq.expBatch = e
 	e.expected = append(e.expected, eq)
 	return eq
 }
@@ -541,9 +541,10 @@ func (e *ExpectedStats) String() string {
 
 type ExpectedAsyncInsert struct {
 	commonExpectation
-	expectSQL string
-	wait      bool
-	delay     time.Duration
+	expectSQL  string
+	expectWait bool
+	wait       bool
+	delay      time.Duration
 }
 
 // WillReturnError allows to set an error for the expected *Conn.AsyncInsert action.
