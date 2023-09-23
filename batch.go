@@ -30,6 +30,10 @@ func (b batchcolumn) Append(interface{}) error {
 	return b.ex.appendErr
 }
 
+func (b batchcolumn) AppendRow(interface{}) error {
+	return b.ex.appendErr
+}
+
 func (b *batch) Abort() error {
 	return b.ex.abortErr
 }

@@ -16,8 +16,6 @@ import (
 	"context"
 	"reflect"
 	"testing"
-
-	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
 )
 
 func TestPrepareExpectations(t *testing.T) {
@@ -90,10 +88,10 @@ func TestQueryExepectationsWithArgsAndRows(t *testing.T) {
 		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
 	}
 
-	cols := make(map[string]column.Type)
-	cols["id"] = "Int32"
-	cols["title"] = "String"
-	cols["content"] = "String"
+	cols := make([]ColumnType, 0)
+	cols = append(cols, ColumnType{Type: "Int32", Name: "id"})
+	cols = append(cols, ColumnType{Type: "String", Name: "title"})
+	cols = append(cols, ColumnType{Type: "String", Name: "content"})
 
 	values := make([][]interface{}, 1)
 	values[0] = make([]interface{}, 3)
@@ -153,9 +151,9 @@ func TestQueryExepectationsWithArgsAndRowsColumnTypes(t *testing.T) {
 		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
 	}
 
-	cols := make(map[string]column.Type)
-	cols["id"] = "Int32"
-	cols["title"] = "String"
+	cols := make([]ColumnType, 0)
+	cols = append(cols, ColumnType{Type: "Int32", Name: "id"})
+	cols = append(cols, ColumnType{Type: "String", Name: "title"})
 
 	values := make([][]interface{}, 1)
 	values[0] = make([]interface{}, 2)

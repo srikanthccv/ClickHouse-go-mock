@@ -306,7 +306,7 @@ func (c *clickhousemock) ExpectAsyncInsert(expectedSQL string, expectedWait bool
 }
 
 // AsyncInsert meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool) error {
+func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool, args ...interface{}) error {
 	ex, err := c.asyncInsert(ctx, query, wait)
 	if ex != nil {
 		select {
@@ -423,7 +423,7 @@ func (c *clickhousemock) ExpectPrepareBatch(expectedSQL string) *ExpectedPrepare
 }
 
 // PrepareBatch meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) PrepareBatch(ctx context.Context, query string) (driver.Batch, error) {
+func (c *clickhousemock) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
 	ex, err := c.prepareBatch(ctx, query)
 	if ex != nil {
 		select {

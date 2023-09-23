@@ -210,17 +210,22 @@ func getReflectType(typ string) reflect.Type {
 	return reflectType
 }
 
-func NewRows(columns map[string]column.Type, values [][]interface{}) *Rows {
+type ColumnType struct {
+	Name string
+	Type string
+}
+
+func NewRows(columns []ColumnType, values [][]interface{}) *Rows {
 	colNames := make([]string, 0, len(columns))
 	colTypes := make([]driver.ColumnType, 0, len(columns))
-	for name, typ := range columns {
-		colNames = append(colNames, name)
-		reflectType := getReflectType(string(typ))
-		colTypes = append(colTypes, NewColumnType(name, string(typ), false, reflectType))
+	for _, col := range columns {
+		colNames = append(colNames, col.Name)
+		reflectType := getReflectType(string(col.Type))
+		colTypes = append(colTypes, NewColumnType(col.Name, string(col.Type), false, reflectType))
 	}
 	block := &proto.Block{}
-	for name, typ := range columns {
-		err := block.AddColumn(name, typ)
+	for _, col := range columns {
+		err := block.AddColumn(col.Name, column.Type(col.Type))
 		if err != nil {
 			panic(err)
 		}
