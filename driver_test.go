@@ -13,6 +13,7 @@
 package mockhouse
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,4 +23,37 @@ func TestMockDriver(t *testing.T) {
 	t.Parallel()
 	_, err := NewClickHouseNative(nil)
 	assert.NoError(t, err)
+}
+
+func TestInit(t *testing.T) {
+	if clickHousePool == nil {
+		t.Error("clickHousePool was not initialized")
+	}
+
+	if clickHousePool.conns == nil {
+		t.Error("clickHousePool.conns was not initialized")
+	}
+}
+
+func TestNewClickHouseNativeConcurrency(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := NewClickHouseNative(nil)
+			if err != nil {
+				t.Errorf("an error '%s' was not expected when creating a new ClickHouseNative", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if len(clickHousePool.conns) < 10 {
+		t.Errorf("expected >= 10 connections in pool, got %d", len(clickHousePool.conns))
+	}
+
+	if clickHousePool.counter < 10 {
+		t.Errorf("expected counter to be >= 10, got %d", clickHousePool.counter)
+	}
 }

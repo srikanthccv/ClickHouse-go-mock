@@ -23,9 +23,9 @@ import (
 var clickHousePool *mockClickHouseDriver
 
 type mockClickHouseDriver struct {
-	sync.Mutex
 	counter int
 	conns   map[string]*clickhousemock
+	sync.Mutex
 }
 
 func init() {
