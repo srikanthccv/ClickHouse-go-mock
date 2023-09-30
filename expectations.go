@@ -77,7 +77,7 @@ type ExpectedQuery struct {
 // WithArgs will match given expected args to actual database query arguments.
 // if at least one argument does not match, it will return an error. For specific
 // arguments an clickhousemock.Argument interface can be used to match an argument.
-func (e *ExpectedQuery) WithArgs(args ...interface{}) *ExpectedQuery {
+func (e *ExpectedQuery) WithArgs(args ...any) *ExpectedQuery {
 	e.args = args
 	return e
 }
@@ -143,7 +143,7 @@ type ExpectedExec struct {
 // WithArgs will match given expected args to actual database exec operation arguments.
 // if at least one argument does not match, it will return an error. For specific
 // arguments an clickhousemock.Argument interface can be used to match an argument.
-func (e *ExpectedExec) WithArgs(args ...interface{}) *ExpectedExec {
+func (e *ExpectedExec) WithArgs(args ...any) *ExpectedExec {
 	e.args = args
 	return e
 }
@@ -189,10 +189,10 @@ func (e *ExpectedExec) String() string {
 type queryBasedExpectation struct {
 	commonExpectation
 	expectSQL string
-	args      []interface{}
+	args      []any
 }
 
-func (e *queryBasedExpectation) matchArgs(args []interface{}) error {
+func (e *queryBasedExpectation) matchArgs(args []any) error {
 	if len(e.args) == 0 && len(args) == 0 {
 		return nil
 	}
@@ -210,7 +210,7 @@ func (e *queryBasedExpectation) matchArgs(args []interface{}) error {
 	return nil
 }
 
-func matchArg(expected, actual interface{}) error {
+func matchArg(expected, actual any) error {
 	if expected == nil {
 		return nil
 	}
@@ -626,7 +626,7 @@ func (e *ExpectedServerVersion) WillReturnVersion(version proto.ServerHandshake)
 }
 
 func (e *ExpectedServerVersion) String() string {
-	return fmt.Sprintf("ServerVersion()")
+	return "ServerVersion() - Mocked"
 }
 
 type ExpectedContributors struct {
@@ -641,5 +641,5 @@ func (e *ExpectedContributors) WillReturnContributors(contributors ...string) *E
 }
 
 func (e *ExpectedContributors) String() string {
-	return fmt.Sprintf("Contributors()")
+	return "Contributors() - Mocked"
 }

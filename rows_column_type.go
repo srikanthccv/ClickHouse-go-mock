@@ -34,7 +34,7 @@ type columnType struct {
 	scanType reflect.Type
 }
 
-func NewColumnType(name, chType string, nullable bool, scanType reflect.Type) driver.ColumnType {
+func NewColumnType(name string, chType string, nullable bool, scanType reflect.Type) driver.ColumnType {
 	return columnType{
 		name:     name,
 		chType:   chType,

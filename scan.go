@@ -27,7 +27,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 )
 
-func scan(block *proto.Block, row int, dest ...interface{}) error {
+func scan(block *proto.Block, row int, dest ...any) error {
 	columns := block.Columns
 	if len(columns) != len(dest) {
 		return &OpError{

@@ -36,7 +36,7 @@ type Rows struct {
 	structMap *structMap
 	colNames  []string
 	colTypes  []driver.ColumnType
-	values    [][]interface{}
+	values    [][]any
 	pos       int
 	nextErr   map[int]error
 	closeErr  error
@@ -46,7 +46,7 @@ func (r *Rows) Next() bool {
 	return r.pos < len(r.values)
 }
 
-func (r *Rows) Scan(dest ...interface{}) error {
+func (r *Rows) Scan(dest ...any) error {
 	if r.pos >= len(r.values) {
 		return io.EOF
 	}
@@ -60,7 +60,7 @@ func (r *Rows) Scan(dest ...interface{}) error {
 	return nil
 }
 
-func (r *Rows) ScanStruct(dest interface{}) error {
+func (r *Rows) ScanStruct(dest any) error {
 	if r.pos >= len(r.values) {
 		return io.EOF
 	}
@@ -74,7 +74,7 @@ func (r *Rows) ScanStruct(dest interface{}) error {
 	return nil
 }
 
-func (r *Rows) Totals(dest ...interface{}) error {
+func (r *Rows) Totals(dest ...any) error {
 	return nil
 }
 
@@ -103,7 +103,7 @@ func (r *Row) Err() error {
 	return r.err
 }
 
-func (r *Row) ScanStruct(dest interface{}) error {
+func (r *Row) ScanStruct(dest any) error {
 	if r.err != nil {
 		return r.err
 	}
@@ -120,7 +120,7 @@ func (r *Row) ScanStruct(dest interface{}) error {
 	return r.rows.Close()
 }
 
-func (r *Row) Scan(dest ...interface{}) error {
+func (r *Row) Scan(dest ...any) error {
 	if r.err != nil {
 		return r.err
 	}
@@ -175,13 +175,13 @@ func getReflectType(typ string) reflect.Type {
 	case "IPv6":
 		reflectType = reflect.TypeOf(string(""))
 	case "Array":
-		reflectType = reflect.TypeOf([]interface{}{})
+		reflectType = reflect.TypeOf([]any{})
 	case "Tuple":
-		reflectType = reflect.TypeOf([]interface{}{})
+		reflectType = reflect.TypeOf([]any{})
 	case "Nullable":
-		reflectType = reflect.TypeOf(interface{}(nil))
+		reflectType = reflect.TypeOf(any(nil))
 	case "Nothing":
-		reflectType = reflect.TypeOf(interface{}(nil))
+		reflectType = reflect.TypeOf(any(nil))
 	case "Enum8":
 		reflectType = reflect.TypeOf(int8(0))
 	case "Enum16":
@@ -215,7 +215,7 @@ type ColumnType struct {
 	Type column.Type
 }
 
-func NewRows(columns []ColumnType, values [][]interface{}) *Rows {
+func NewRows(columns []ColumnType, values [][]any) *Rows {
 	colNames := make([]string, 0, len(columns))
 	colTypes := make([]driver.ColumnType, 0, len(columns))
 	for _, col := range columns {

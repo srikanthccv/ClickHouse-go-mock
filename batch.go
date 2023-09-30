@@ -26,11 +26,11 @@ type batchcolumn struct {
 	query string
 }
 
-func (b batchcolumn) Append(interface{}) error {
+func (b batchcolumn) Append(any) error {
 	return b.ex.appendErr
 }
 
-func (b batchcolumn) AppendRow(interface{}) error {
+func (b batchcolumn) AppendRow(any) error {
 	return b.ex.appendErr
 }
 
@@ -38,7 +38,7 @@ func (b *batch) Abort() error {
 	return b.ex.abortErr
 }
 
-func (b *batch) Append(v ...interface{}) error {
+func (b *batch) Append(v ...any) error {
 	for _, ex := range b.ex.expected {
 		if ap, ok := ex.(*ExpectedAppend); ok && !ap.triggered {
 			ap.triggered = true
@@ -48,7 +48,7 @@ func (b *batch) Append(v ...interface{}) error {
 	return b.ex.appendErr
 }
 
-func (b *batch) AppendStruct(v interface{}) error {
+func (b *batch) AppendStruct(v any) error {
 	return b.ex.appendStructErr
 }
 
