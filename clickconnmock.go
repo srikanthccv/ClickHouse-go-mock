@@ -81,7 +81,7 @@ type ClickConnMockCommon interface {
 
 	// ExpectQueryRow expects QueryRow() to be called with expectedSQL query.
 	// the *ExpectedQuery allows to mock database response.
-	ExpectQueryRow(expectedSQL string) *ExpectedQuery
+	ExpectQueryRow(expectedSQL string) *ExpectedQueryRow
 
 	// ExpectQuery expects Query() to be called with expectedSQL query.
 	// the *ExpectedQuery allows to mock database response.
@@ -117,11 +117,6 @@ type ClickConnMockCommon interface {
 	// in any order. Or otherwise if switched to true, any unmatched
 	// expectations will be expected in order
 	MatchExpectationsInOrder(bool)
-
-	// NewRows allows Rows to be created from a
-	// sql driver.Value slice or from the CSV string and
-	// to be used as sql driver.Rows.
-	NewRows(columns []string) *Rows
 }
 
 type clickhousemock struct {
@@ -134,6 +129,9 @@ type clickhousemock struct {
 
 	expected []expectation
 }
+
+var _ ClickConnMockCommon = (*clickhousemock)(nil)
+var _ driver.Conn = (*clickhousemock)(nil)
 
 func (c *clickhousemock) open(options *clickhouse.Options) (*clickhousemock, error) {
 	if c.queryMatcher == nil {
@@ -306,7 +304,7 @@ func (c *clickhousemock) ExpectAsyncInsert(expectedSQL string, expectedWait bool
 }
 
 // AsyncInsert meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool, args ...interface{}) error {
+func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
 	ex, err := c.asyncInsert(ctx, query, wait)
 	if ex != nil {
 		select {
@@ -374,7 +372,7 @@ func (c *clickhousemock) ExpectExec(expectedSQL string) *ExpectedExec {
 }
 
 // Exec meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) Exec(ctx context.Context, query string, args ...interface{}) error {
+func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) error {
 	c.drv.Lock()
 	defer c.drv.Unlock()
 
@@ -478,9 +476,8 @@ func (c *clickhousemock) prepareBatch(ctx context.Context, query string) (*Expec
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
-	fmt.Println("here", c.queryMatcher)
 	if err := c.queryMatcherFunc().Match(expected.expectSQL, query); err != nil {
-		return nil, fmt.Errorf("Prepare: %v", err)
+		return nil, err
 	}
 
 	expected.triggered = true
@@ -495,7 +492,7 @@ func (c *clickhousemock) ExpectQueryRow(expectedSQL string) *ExpectedQueryRow {
 }
 
 // QueryRow meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) QueryRow(ctx context.Context, query string, args ...interface{}) driver.Row {
+func (c *clickhousemock) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
 	ex, err := c.queryRow(ctx, query, args...)
 	if ex != nil {
 		ex.row.err = err
@@ -509,7 +506,7 @@ func (c *clickhousemock) QueryRow(ctx context.Context, query string, args ...int
 	return ex.row
 }
 
-func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...interface{}) (*ExpectedQueryRow, error) {
+func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any) (*ExpectedQueryRow, error) {
 	var expected *ExpectedQueryRow
 	var fulfilled int
 	var ok bool
@@ -564,7 +561,7 @@ func (c *clickhousemock) ExpectQuery(expectedSQL string) *ExpectedQuery {
 }
 
 // Query meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) Query(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
+func (c *clickhousemock) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
 	ex, err := c.query(ctx, query, args...)
 	if ex != nil {
 		select {
@@ -580,7 +577,7 @@ func (c *clickhousemock) Query(ctx context.Context, query string, args ...interf
 	return nil, err
 }
 
-func (c *clickhousemock) query(ctx context.Context, query string, args ...interface{}) (*ExpectedQuery, error) {
+func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (*ExpectedQuery, error) {
 	var expected *ExpectedQuery
 	var fulfilled int
 	var ok bool
@@ -639,7 +636,7 @@ func (c *clickhousemock) ExpectSelect(expectedSQL string) *ExpectedSelect {
 }
 
 // Select meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) Select(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
+func (c *clickhousemock) Select(ctx context.Context, dest any, query string, args ...any) error {
 	ex, err := c.selectQuery(ctx, query)
 	if ex != nil {
 		select {
@@ -776,10 +773,6 @@ func (c *clickhousemock) Contributors() []string {
 	}
 
 	if expected == nil {
-		msg := "call to database Contributors was not expected"
-		if fulfilled == len(c.expected) {
-			msg = "all expectations were already fulfilled, " + msg
-		}
 		return []string{}
 	}
 
