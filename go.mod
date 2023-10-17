@@ -3,7 +3,7 @@ module github.com/srikanthccv/ClickHouse-go-mock
 go 1.20
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.14.2
+	github.com/ClickHouse/clickhouse-go/v2 v2.14.3
 	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/stretchr/testify v1.8.4
 )
@@ -25,6 +25,6 @@ require (
 	github.com/shopspring/decimal v1.3.1 // indirect
 	go.opentelemetry.io/otel v1.19.0 // indirect
 	go.opentelemetry.io/otel/trace v1.19.0 // indirect
-	golang.org/x/sys v0.12.0 // indirect
+	golang.org/x/sys v0.13.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
