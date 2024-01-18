@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.17.0
-	github.com/DATA-DOG/go-sqlmock v1.5.1
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/stretchr/testify v1.8.4
 )
 
