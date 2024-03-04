@@ -176,6 +176,14 @@ func getReflectType(typ string) reflect.Type {
 		reflectType = reflect.TypeOf(string(""))
 	case "Array":
 		reflectType = reflect.TypeOf([]any{})
+	case "Array(String)":
+		reflectType = reflect.TypeOf([]string{})
+	case "Array(Int64)":
+		reflectType = reflect.TypeOf([]int64{})
+	case "Array(Float64)":
+		reflectType = reflect.TypeOf([]float64{})
+	case "Array(Bool)":
+		reflectType = reflect.TypeOf([]bool{})
 	case "Tuple":
 		reflectType = reflect.TypeOf([]any{})
 	case "Nullable":
