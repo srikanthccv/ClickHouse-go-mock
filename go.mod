@@ -3,13 +3,13 @@ module github.com/srikanthccv/ClickHouse-go-mock
 go 1.20
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.21.0
+	github.com/ClickHouse/clickhouse-go/v2 v2.22.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/stretchr/testify v1.9.0
 )
 
 require (
-	github.com/ClickHouse/ch-go v0.61.3 // indirect
+	github.com/ClickHouse/ch-go v0.61.5 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
