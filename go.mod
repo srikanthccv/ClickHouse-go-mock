@@ -3,7 +3,7 @@ module github.com/srikanthccv/ClickHouse-go-mock
 go 1.20
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.22.0
+	github.com/ClickHouse/clickhouse-go/v2 v2.22.3
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/stretchr/testify v1.9.0
 )
