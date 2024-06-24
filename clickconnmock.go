@@ -406,6 +406,7 @@ func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) er
 	}
 
 	if err := c.queryMatcherFunc().Match(expected.expectSQL, query); err != nil {
+		expected.Unlock()
 		return fmt.Errorf("call to database Exec with unexpected query: %s", query)
 	}
 
