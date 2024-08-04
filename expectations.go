@@ -221,7 +221,7 @@ func matchArg(expected, actual any) error {
 	if reflect.DeepEqual(expected, actual) {
 		return nil
 	}
-	return fmt.Errorf("expected %v, got %v", expected, actual)
+	return fmt.Errorf("expected %v (%T), got %v (%T)", expected, expected, actual, actual)
 }
 
 // ExpectedPing is used to manage *driver.Conn.Ping expectations.
@@ -596,6 +596,12 @@ type ExpectedSelect struct {
 	commonExpectation
 	expectSQL string
 	delay     time.Duration
+	rows      *Rows
+}
+
+func (e *ExpectedSelect) WillReturnRows(rows *Rows) *ExpectedSelect {
+	e.rows = rows
+	return e
 }
 
 // WillReturnError allows to set an error for the expected *Conn.Select action.

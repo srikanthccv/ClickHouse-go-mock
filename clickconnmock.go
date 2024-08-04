@@ -15,6 +15,7 @@ package mockhouse
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -638,6 +639,30 @@ func (c *clickhousemock) ExpectSelect(expectedSQL string) *ExpectedSelect {
 
 // Select meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Select(ctx context.Context, dest any, query string, args ...any) error {
+	value := reflect.ValueOf(dest)
+	if value.Kind() != reflect.Ptr {
+		return &OpError{
+			Op:  "Select",
+			Err: fmt.Errorf("must pass a pointer, not a value, to Select destination"),
+		}
+	}
+	if value.IsNil() {
+		return &OpError{
+			Op:  "Select",
+			Err: fmt.Errorf("nil pointer passed to Select destination"),
+		}
+	}
+	direct := reflect.Indirect(value)
+	if direct.Kind() != reflect.Slice {
+		return fmt.Errorf("must pass a slice to Select destination")
+	}
+	if direct.Len() != 0 {
+		// dest should point to empty slice
+		// to make select result correct
+		direct.Set(reflect.MakeSlice(direct.Type(), 0, direct.Cap()))
+	}
+	base := direct.Type().Elem()
+
 	ex, err := c.selectQuery(ctx, query)
 	if ex != nil {
 		select {
@@ -645,7 +670,20 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 			if err != nil {
 				return err
 			}
-			return nil
+
+			defer ex.rows.Close()
+			for ex.rows.Next() {
+				elem := reflect.New(base)
+				if err := ex.rows.ScanStruct(elem.Interface()); err != nil {
+					return err
+				}
+				direct.Set(reflect.Append(direct, elem.Elem()))
+			}
+			if err := ex.rows.Close(); err != nil {
+				return err
+			}
+			return ex.rows.Err()
+
 		case <-ctx.Done():
 			return ctx.Err()
 		}
