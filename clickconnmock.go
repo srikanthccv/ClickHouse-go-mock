@@ -639,29 +639,31 @@ func (c *clickhousemock) ExpectSelect(expectedSQL string) *ExpectedSelect {
 
 // Select meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Select(ctx context.Context, dest any, query string, args ...any) error {
-	value := reflect.ValueOf(dest)
-	if value.Kind() != reflect.Ptr {
+	// Implementation based on that of Select in clickhouse-go https://github.com/ClickHouse/clickhouse-go/blob/main/scan.go#L29
+	dstSlicePtr := reflect.ValueOf(dest)
+	if dstSlicePtr.Kind() != reflect.Ptr {
 		return &OpError{
 			Op:  "Select",
 			Err: fmt.Errorf("must pass a pointer, not a value, to Select destination"),
 		}
 	}
-	if value.IsNil() {
+	if dstSlicePtr.IsNil() {
 		return &OpError{
 			Op:  "Select",
 			Err: fmt.Errorf("nil pointer passed to Select destination"),
 		}
 	}
-	direct := reflect.Indirect(value)
-	if direct.Kind() != reflect.Slice {
+
+	dstSlice := reflect.Indirect(dstSlicePtr)
+	if dstSlice.Kind() != reflect.Slice {
 		return fmt.Errorf("must pass a slice to Select destination")
 	}
-	if direct.Len() != 0 {
+	if dstSlice.Len() != 0 {
 		// dest should point to empty slice
 		// to make select result correct
-		direct.Set(reflect.MakeSlice(direct.Type(), 0, direct.Cap()))
+		dstSlice.Set(reflect.MakeSlice(dstSlice.Type(), 0, dstSlice.Cap()))
 	}
-	base := direct.Type().Elem()
+	dstSliceElType := dstSlice.Type().Elem()
 
 	ex, err := c.selectQuery(ctx, query)
 	if ex != nil {
@@ -673,11 +675,11 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 
 			defer ex.rows.Close()
 			for ex.rows.Next() {
-				elem := reflect.New(base)
+				elem := reflect.New(dstSliceElType)
 				if err := ex.rows.ScanStruct(elem.Interface()); err != nil {
 					return err
 				}
-				direct.Set(reflect.Append(direct, elem.Elem()))
+				dstSlice.Set(reflect.Append(dstSlice, elem.Elem()))
 			}
 			if err := ex.rows.Close(); err != nil {
 				return err

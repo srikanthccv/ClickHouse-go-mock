@@ -65,6 +65,7 @@ func (r *Rows) ScanStruct(dest any) error {
 		return io.EOF
 	}
 
+	// Based on implementation of rows.ScanStruct in clickhouse-go https://github.com/ClickHouse/clickhouse-go/blob/main/clickhouse_rows.go#L81
 	values, err := r.structMap.Map("ScanStruct", r.Columns(), dest, true)
 	if err != nil {
 		return err
