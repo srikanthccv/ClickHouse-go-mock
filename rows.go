@@ -64,14 +64,13 @@ func (r *Rows) ScanStruct(dest any) error {
 	if r.pos >= len(r.values) {
 		return io.EOF
 	}
-	if err := scan(r.block, r.pos, r.structMap, dest); err != nil {
+
+	// Based on implementation of rows.ScanStruct in clickhouse-go https://github.com/ClickHouse/clickhouse-go/blob/main/clickhouse_rows.go#L81
+	values, err := r.structMap.Map("ScanStruct", r.Columns(), dest, true)
+	if err != nil {
 		return err
 	}
-	if err := r.nextErr[r.pos]; err != nil {
-		return err
-	}
-	r.pos++
-	return nil
+	return r.Scan(values...)
 }
 
 func (r *Rows) Totals(dest ...any) error {
