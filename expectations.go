@@ -215,12 +215,10 @@ func matchArg(expected, actual any) error {
 		return nil
 	}
 
-	if expected == actual {
-		return nil
-	}
 	if reflect.DeepEqual(expected, actual) {
 		return nil
 	}
+
 	return fmt.Errorf("expected %v (%T), got %v (%T)", expected, expected, actual, actual)
 }
 
