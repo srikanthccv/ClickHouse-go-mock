@@ -239,7 +239,7 @@ func (c *clickhousemock) Stats() driver.Stats {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		panic(fmt.Errorf(msg))
+		panic((msg))
 	}
 
 	expected.triggered = true

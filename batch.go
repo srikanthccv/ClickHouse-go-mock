@@ -12,7 +12,10 @@
 
 package mockhouse
 
-import "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+import (
+	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+)
 
 type batch struct {
 	conn  *clickhousemock
@@ -70,4 +73,8 @@ func (b *batch) IsSent() bool {
 
 func (b *batch) Rows() int {
 	return b.ex.rows
+}
+
+func (b *batch) Columns() []column.Interface {
+	return nil
 }
