@@ -14,6 +14,7 @@ package mockhouse
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
@@ -557,5 +558,94 @@ func TestPrepareAndExecute(t *testing.T) {
 	err = stmt.Send()
 	if err != nil {
 		t.Errorf("an error '%s' was not expected when executing a statement", err)
+	}
+}
+
+func TestQueryRowExpectedRow(t *testing.T) {
+	t.Parallel()
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	row := NewRow([]ColumnType{{Type: "Int32", Name: "id"}, {Type: "String", Name: "title"}},
+		[]any{int32(1), "title1"})
+
+	mock.ExpectQueryRow("SELECT id, title FROM articles").WillReturnRow(row)
+
+	returnRow := mock.QueryRow(context.Background(), "SELECT id, title FROM articles")
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when querying a statement", err)
+	}
+
+	var id int32
+	var title string
+	err = returnRow.Scan(&id, &title)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when scanning a row", err)
+	}
+
+	if id != 1 {
+		t.Errorf("expected id to be 1, but got %d", id)
+	}
+
+	if title != "title1" {
+		t.Errorf("expected title to be title1, but got %s", title)
+	}
+}
+
+func TestQueryRowExpectedNoRowsError(t *testing.T) {
+	t.Parallel()
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	row := NewRow([]ColumnType{{Type: "Int32", Name: "id"}, {Type: "String", Name: "title"}},
+		nil)
+
+	mock.ExpectQueryRow("SELECT id, title FROM articles").WillReturnRow(row)
+
+	returnRow := mock.QueryRow(context.Background(), "SELECT id, title FROM articles")
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when querying a statement", err)
+	}
+
+	var id int32
+	var title string
+	err = returnRow.Scan(&id, &title)
+
+	if err == nil {
+		t.Error("an error was expected due to no rows")
+	}
+
+	if err != sql.ErrNoRows {
+		t.Errorf("expected error to be sql.ErrNoRows, but got %s", err)
+	}
+}
+
+func TestQueryReturnRowCustomError(t *testing.T) {
+	t.Parallel()
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	row := NewRow([]ColumnType{{Type: "Int32", Name: "id"}, {Type: "String", Name: "title"}},
+		[]any{int32(1), "title1"})
+
+	mock.ExpectQueryRow("SELECT id, title FROM articles").WillReturnRow(row).WillReturnError(errors.New("some error"))
+
+	returnRow := mock.QueryRow(context.Background(), "SELECT id, title FROM articles")
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when querying a statement", err)
+	}
+
+	var id int32
+	var title string
+	err = returnRow.Scan(&id, &title)
+
+	if err.Error() != "some error" {
+		t.Errorf("expected error to be some error, but got %s", err)
 	}
 }

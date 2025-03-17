@@ -251,3 +251,15 @@ func NewRows(columns []ColumnType, values [][]any) *Rows {
 		values:    values,
 	}
 }
+
+func NewRow(columns []ColumnType, values []any) *Row {
+	values2 := make([][]any, 0)
+	if len(values) != 0 {
+		values2 = append(values2, values)
+	}
+
+	rows := NewRows(columns, values2)
+	return &Row{
+		rows: rows,
+	}
+}

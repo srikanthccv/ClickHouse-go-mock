@@ -580,6 +580,12 @@ func (e *ExpectedQueryRow) WillReturnRow(row *Row) *ExpectedQueryRow {
 	return e
 }
 
+func (e *ExpectedQueryRow) WillReturnError(err error) *ExpectedQueryRow {
+	e.row.err = err
+	e.err = err
+	return e
+}
+
 // WillDelay allows to set a delay for the expected *Conn.QueryRow action.
 func (e *ExpectedQueryRow) WillDelay(d time.Duration) *ExpectedQueryRow {
 	e.delay = d
