@@ -262,6 +262,7 @@ type ExpectedPrepareBatch struct {
 	appendStructErr error
 	flushErr        error
 	sendErr         error
+	closeErr        error
 	mustBeSent      bool
 	wasClosed       bool
 	delay           time.Duration
@@ -475,6 +476,32 @@ func (e *ExpectedIsSent) String() string {
 // ExpectIsSent allows to expect IsSent() on this prepared batch statement.
 func (e *ExpectedPrepareBatch) ExpectIsSent() *ExpectedIsSent {
 	eq := &ExpectedIsSent{}
+	eq.expectSQL = e.expectSQL
+	eq.expBatch = e
+	e.expected = append(e.expected, eq)
+	return eq
+}
+
+type ExpectedBatchClose struct {
+	commonExpectation
+	expBatch  *ExpectedPrepareBatch
+	expectSQL string
+}
+
+// WillReturnError allows to set an error for the expected *batch.Close action.
+func (e *ExpectedBatchClose) WillReturnError(err error) *ExpectedBatchClose {
+	e.err = err
+	e.expBatch.closeErr = err
+	return e
+}
+
+func (e *ExpectedBatchClose) String() string {
+	return fmt.Sprintf("Close(%s)", e.expectSQL)
+}
+
+// ExpectClose allows to expect Close() on this prepared batch statement.
+func (e *ExpectedPrepareBatch) ExpectClose() *ExpectedBatchClose {
+	eq := &ExpectedBatchClose{}
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)

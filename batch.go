@@ -17,6 +17,8 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
+var _ driver.Batch = (*batch)(nil)
+
 type batch struct {
 	conn  *clickhousemock
 	ex    *ExpectedPrepareBatch
@@ -77,4 +79,8 @@ func (b *batch) Rows() int {
 
 func (b *batch) Columns() []column.Interface {
 	return nil
+}
+
+func (b *batch) Close() error {
+	return b.ex.closeErr
 }
