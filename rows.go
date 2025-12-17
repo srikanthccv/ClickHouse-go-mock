@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"io"
 	"reflect"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -164,9 +165,9 @@ func getReflectType(typ string) reflect.Type {
 	case "FixedString":
 		reflectType = reflect.TypeOf(string(""))
 	case "Date":
-		reflectType = reflect.TypeOf(string(""))
+		reflectType = reflect.TypeOf(time.Time{})
 	case "DateTime":
-		reflectType = reflect.TypeOf(string(""))
+		reflectType = reflect.TypeOf(time.Time{})
 	case "UUID":
 		reflectType = reflect.TypeOf(string(""))
 	case "IPv4":
@@ -222,7 +223,36 @@ type ColumnType struct {
 	Type column.Type
 }
 
-func NewRows(columns []ColumnType, values [][]any) *Rows {
+// rowsOptions holds configuration options for NewRows
+type rowsOptions struct {
+	timezone *time.Location
+}
+
+// RowsOption is a function type that modifies rowsOptions
+type RowsOption func(*rowsOptions)
+
+// defaultRowsOptions returns the default options for NewRows
+func defaultRowsOptions() rowsOptions {
+	return rowsOptions{
+		timezone: time.UTC,
+	}
+}
+
+// WithTimezone sets the timezone for the proto.Block used in Rows
+func WithTimezone(loc *time.Location) RowsOption {
+	return func(opts *rowsOptions) {
+		opts.timezone = loc
+	}
+}
+
+func NewRows(columns []ColumnType, values [][]any, opts ...RowsOption) *Rows {
+	// Apply default options first
+	options := defaultRowsOptions()
+	// // Then apply user-provided options to override defaults
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	colNames := make([]string, 0, len(columns))
 	colTypes := make([]driver.ColumnType, 0, len(columns))
 	for _, col := range columns {
@@ -231,6 +261,10 @@ func NewRows(columns []ColumnType, values [][]any) *Rows {
 		colTypes = append(colTypes, NewColumnType(col.Name, string(col.Type), false, reflectType))
 	}
 	block := &proto.Block{}
+	// Set timezone on block before adding columns
+	block.ServerContext = &column.ServerContext{
+		Timezone: options.timezone,
+	}
 	for _, col := range columns {
 		err := block.AddColumn(col.Name, col.Type)
 		if err != nil {
@@ -252,13 +286,13 @@ func NewRows(columns []ColumnType, values [][]any) *Rows {
 	}
 }
 
-func NewRow(columns []ColumnType, values []any) *Row {
+func NewRow(columns []ColumnType, values []any, opts ...RowsOption) *Row {
 	values2 := make([][]any, 0)
 	if len(values) != 0 {
 		values2 = append(values2, values)
 	}
 
-	rows := NewRows(columns, values2)
+	rows := NewRows(columns, values2, opts...)
 	return &Row{
 		rows: rows,
 	}
