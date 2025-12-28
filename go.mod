@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.40.1
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 )
 
 require (
