@@ -260,11 +260,8 @@ func NewRows(columns []ColumnType, values [][]any, opts ...RowsOption) *Rows {
 		reflectType := getReflectType(string(col.Type))
 		colTypes = append(colTypes, NewColumnType(col.Name, string(col.Type), false, reflectType))
 	}
-	block := &proto.Block{}
-	// Set timezone on block before adding columns
-	block.ServerContext = &column.ServerContext{
-		Timezone: options.timezone,
-	}
+	block := proto.NewBlock()
+	block.ServerContext.Timezone = options.timezone
 	for _, col := range columns {
 		err := block.AddColumn(col.Name, col.Type)
 		if err != nil {

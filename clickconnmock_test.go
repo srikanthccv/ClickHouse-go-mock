@@ -18,6 +18,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestPrepareExpectations(t *testing.T) {
@@ -647,5 +648,49 @@ func TestQueryReturnRowCustomError(t *testing.T) {
 
 	if err.Error() != "some error" {
 		t.Errorf("expected error to be some error, but got %s", err)
+	}
+}
+
+func TestNewRowsWithDateTimeColumn(t *testing.T) {
+	t.Parallel()
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	cols := []ColumnType{
+		{Type: "String", Name: "name"},
+		{Type: "DateTime", Name: "created_at"},
+	}
+	now := time.Now().Truncate(time.Second)
+	values := [][]any{
+		{"alice", now},
+	}
+	rows := NewRows(cols, values)
+
+	mock.ExpectQuery("SELECT name, created_at FROM users").WillReturnRows(rows)
+
+	returnRows, err := mock.Query(context.Background(), "SELECT name, created_at FROM users")
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when querying", err)
+	}
+
+	if !returnRows.Next() {
+		t.Fatal("expected one row")
+	}
+
+	var name string
+	var createdAt time.Time
+	err = returnRows.Scan(&name, &createdAt)
+	if err != nil {
+		t.Errorf("an error '%s' was not expected when scanning", err)
+	}
+
+	if name != "alice" {
+		t.Errorf("expected name 'alice', got '%s'", name)
+	}
+
+	if !createdAt.Equal(now) {
+		t.Errorf("expected created_at %v, got %v", now, createdAt)
 	}
 }
