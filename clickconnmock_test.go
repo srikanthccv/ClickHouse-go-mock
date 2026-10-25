@@ -40,7 +40,9 @@ func TestPrepareExpectations(t *testing.T) {
 		t.Errorf("an error '%s' was not expected when preparing a batch statement", err)
 	}
 
-	batch.Append(1, "title", "content")
+	if err := batch.Append(1, "title", "content"); err != nil {
+		t.Errorf("an error '%s' was not expected when appending to a batch", err)
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
@@ -90,7 +92,7 @@ func TestQueryExepectationsWithArgsAndRows(t *testing.T) {
 		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
 	}
 
-	cols := make([]ColumnType, 0)
+	cols := make([]ColumnType, 0, 3)
 	cols = append(cols, ColumnType{Type: "Int32", Name: "id"})
 	cols = append(cols, ColumnType{Type: "String", Name: "title"})
 	cols = append(cols, ColumnType{Type: "String", Name: "content"})
@@ -138,6 +140,7 @@ func TestQueryExepectationsWithArgsAndRows(t *testing.T) {
 
 		if cnt > 2 {
 			t.Errorf("expected only 1 row, but got more")
+
 			break
 		}
 	}
@@ -153,7 +156,7 @@ func TestQueryExepectationsWithArgsAndRowsColumnTypes(t *testing.T) {
 		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
 	}
 
-	cols := make([]ColumnType, 0)
+	cols := make([]ColumnType, 0, 2)
 	cols = append(cols, ColumnType{Type: "Int32", Name: "id"})
 	cols = append(cols, ColumnType{Type: "String", Name: "title"})
 
@@ -209,6 +212,7 @@ func TestQueryExepectationsWithArgsAndRowsColumnTypes(t *testing.T) {
 
 		if cnt > 2 {
 			t.Errorf("expected only 1 row, but got more")
+
 			break
 		}
 	}
@@ -258,7 +262,7 @@ func TestQueryExpectationsWithDifferentDataTypes(t *testing.T) {
 		t.Errorf("an error '%s' was not expected when opening a stub database connection", err)
 	}
 
-	cols := make([]ColumnType, 0)
+	cols := make([]ColumnType, 0, 3)
 	cols = append(cols, ColumnType{Type: "Int32", Name: "id"})
 	cols = append(cols, ColumnType{Type: "Float64", Name: "price"})
 	cols = append(cols, ColumnType{Type: "String", Name: "description"})
@@ -306,6 +310,7 @@ func TestQueryExpectationsWithDifferentDataTypes(t *testing.T) {
 
 		if cnt > 2 {
 			t.Errorf("expected only 1 row, but got more")
+
 			break
 		}
 	}

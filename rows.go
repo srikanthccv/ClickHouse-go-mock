@@ -51,13 +51,17 @@ func (r *Rows) Scan(dest ...any) error {
 	if r.pos >= len(r.values) {
 		return io.EOF
 	}
+
 	if err := scan(r.block, r.pos, dest...); err != nil {
 		return err
 	}
+
 	if err := r.nextErr[r.pos]; err != nil {
 		return err
 	}
+
 	r.pos++
+
 	return nil
 }
 
@@ -66,11 +70,13 @@ func (r *Rows) ScanStruct(dest any) error {
 		return io.EOF
 	}
 
-	// Based on implementation of rows.ScanStruct in clickhouse-go https://github.com/ClickHouse/clickhouse-go/blob/main/clickhouse_rows.go#L81
+	// Based on implementation of rows.ScanStruct in clickhouse-go
+	// https://github.com/ClickHouse/clickhouse-go/blob/main/clickhouse_rows.go#L81
 	values, err := r.structMap.Map("ScanStruct", r.Columns(), dest, true)
 	if err != nil {
 		return err
 	}
+
 	return r.Scan(values...)
 }
 
@@ -111,16 +117,21 @@ func (r *Row) ScanStruct(dest any) error {
 	if r.err != nil {
 		return r.err
 	}
+
 	if !r.rows.Next() {
 		r.rows.Close()
+
 		if err := r.rows.Err(); err != nil {
 			return err
 		}
+
 		return sql.ErrNoRows
 	}
+
 	if err := r.rows.ScanStruct(dest); err != nil {
 		return err
 	}
+
 	return r.rows.Close()
 }
 
@@ -128,98 +139,67 @@ func (r *Row) Scan(dest ...any) error {
 	if r.err != nil {
 		return r.err
 	}
+
 	if !r.rows.Next() {
 		r.rows.Close()
+
 		if err := r.rows.Err(); err != nil {
 			return err
 		}
+
 		return sql.ErrNoRows
 	}
+
 	if err := r.rows.Scan(dest...); err != nil {
 		return err
 	}
+
 	return r.rows.Close()
 }
 
+// reflectTypes maps ClickHouse type names to the Go types reported by ColumnType.ScanType.
+var reflectTypes = map[string]reflect.Type{
+	"Int8":                    reflect.TypeOf(int8(0)),
+	"Int16":                   reflect.TypeOf(int16(0)),
+	"Int32":                   reflect.TypeOf(int32(0)),
+	"Int64":                   reflect.TypeOf(int64(0)),
+	"UInt8":                   reflect.TypeOf(uint8(0)),
+	"UInt16":                  reflect.TypeOf(uint16(0)),
+	"UInt32":                  reflect.TypeOf(uint32(0)),
+	"UInt64":                  reflect.TypeOf(uint64(0)),
+	"Float32":                 reflect.TypeOf(float32(0)),
+	"Float64":                 reflect.TypeOf(float64(0)),
+	"String":                  reflect.TypeOf(string("")),
+	"FixedString":             reflect.TypeOf(string("")),
+	"Date":                    reflect.TypeOf(time.Time{}),
+	"DateTime":                reflect.TypeOf(time.Time{}),
+	"UUID":                    reflect.TypeOf(string("")),
+	"IPv4":                    reflect.TypeOf(string("")),
+	"IPv6":                    reflect.TypeOf(string("")),
+	"Array":                   reflect.TypeOf([]any{}),
+	"Array(String)":           reflect.TypeOf([]string{}),
+	"Array(Int64)":            reflect.TypeOf([]int64{}),
+	"Array(Float64)":          reflect.TypeOf([]float64{}),
+	"Array(Bool)":             reflect.TypeOf([]bool{}),
+	"Tuple":                   reflect.TypeOf([]any{}),
+	"Nullable":                reflect.TypeOf(any(nil)),
+	"Nothing":                 reflect.TypeOf(any(nil)),
+	"Enum8":                   reflect.TypeOf(int8(0)),
+	"Enum16":                  reflect.TypeOf(int16(0)),
+	"LowCardinality":          reflect.TypeOf(string("")),
+	"Decimal":                 reflect.TypeOf(string("")),
+	"Decimal32":               reflect.TypeOf(int32(0)),
+	"Decimal64":               reflect.TypeOf(int64(0)),
+	"Decimal128":              reflect.TypeOf(string("")),
+	"Decimal256":              reflect.TypeOf(string("")),
+	"AggregateFunction":       reflect.TypeOf(string("")),
+	"Nested":                  reflect.TypeOf(string("")),
+	"SimpleAggregateFunction": reflect.TypeOf(string("")),
+	"TupleElement":            reflect.TypeOf(string("")),
+}
+
 func getReflectType(typ string) reflect.Type {
-	var reflectType reflect.Type
-	switch typ {
-	case "Int8":
-		reflectType = reflect.TypeOf(int8(0))
-	case "Int16":
-		reflectType = reflect.TypeOf(int16(0))
-	case "Int32":
-		reflectType = reflect.TypeOf(int32(0))
-	case "Int64":
-		reflectType = reflect.TypeOf(int64(0))
-	case "UInt8":
-		reflectType = reflect.TypeOf(uint8(0))
-	case "UInt16":
-		reflectType = reflect.TypeOf(uint16(0))
-	case "UInt32":
-		reflectType = reflect.TypeOf(uint32(0))
-	case "UInt64":
-		reflectType = reflect.TypeOf(uint64(0))
-	case "Float32":
-		reflectType = reflect.TypeOf(float32(0))
-	case "Float64":
-		reflectType = reflect.TypeOf(float64(0))
-	case "String":
-		reflectType = reflect.TypeOf(string(""))
-	case "FixedString":
-		reflectType = reflect.TypeOf(string(""))
-	case "Date":
-		reflectType = reflect.TypeOf(time.Time{})
-	case "DateTime":
-		reflectType = reflect.TypeOf(time.Time{})
-	case "UUID":
-		reflectType = reflect.TypeOf(string(""))
-	case "IPv4":
-		reflectType = reflect.TypeOf(string(""))
-	case "IPv6":
-		reflectType = reflect.TypeOf(string(""))
-	case "Array":
-		reflectType = reflect.TypeOf([]any{})
-	case "Array(String)":
-		reflectType = reflect.TypeOf([]string{})
-	case "Array(Int64)":
-		reflectType = reflect.TypeOf([]int64{})
-	case "Array(Float64)":
-		reflectType = reflect.TypeOf([]float64{})
-	case "Array(Bool)":
-		reflectType = reflect.TypeOf([]bool{})
-	case "Tuple":
-		reflectType = reflect.TypeOf([]any{})
-	case "Nullable":
-		reflectType = reflect.TypeOf(any(nil))
-	case "Nothing":
-		reflectType = reflect.TypeOf(any(nil))
-	case "Enum8":
-		reflectType = reflect.TypeOf(int8(0))
-	case "Enum16":
-		reflectType = reflect.TypeOf(int16(0))
-	case "LowCardinality":
-		reflectType = reflect.TypeOf(string(""))
-	case "Decimal":
-		reflectType = reflect.TypeOf(string(""))
-	case "Decimal32":
-		reflectType = reflect.TypeOf(int32(0))
-	case "Decimal64":
-		reflectType = reflect.TypeOf(int64(0))
-	case "Decimal128":
-		reflectType = reflect.TypeOf(string(""))
-	case "Decimal256":
-		reflectType = reflect.TypeOf(string(""))
-	case "AggregateFunction":
-		reflectType = reflect.TypeOf(string(""))
-	case "Nested":
-		reflectType = reflect.TypeOf(string(""))
-	case "SimpleAggregateFunction":
-		reflectType = reflect.TypeOf(string(""))
-	case "TupleElement":
-		reflectType = reflect.TypeOf(string(""))
-	}
-	return reflectType
+	return reflectTypes[typ]
 }
 
 type ColumnType struct {
@@ -258,12 +238,14 @@ func NewRows(columns []ColumnType, values [][]any, opts ...RowsOption) *Rows {
 	}
 
 	colNames := make([]string, 0, len(columns))
+
 	colTypes := make([]driver.ColumnType, 0, len(columns))
 	for _, col := range columns {
 		colNames = append(colNames, col.Name)
 		reflectType := getReflectType(string(col.Type))
 		colTypes = append(colTypes, NewColumnType(col.Name, string(col.Type), false, reflectType))
 	}
+
 	block := &proto.Block{}
 	// Set timezone on block before adding columns
 	block.ServerContext = &column.ServerContext{
@@ -275,12 +257,14 @@ func NewRows(columns []ColumnType, values [][]any, opts ...RowsOption) *Rows {
 			panic(err)
 		}
 	}
+
 	for _, row := range values {
 		err := block.Append(row...)
 		if err != nil {
 			panic(err)
 		}
 	}
+
 	return &Rows{
 		block:     block,
 		structMap: newStructMap(),
@@ -297,6 +281,7 @@ func NewRow(columns []ColumnType, values []any, opts ...RowsOption) *Row {
 	}
 
 	rows := NewRows(columns, values2, opts...)
+
 	return &Row{
 		rows: rows,
 	}

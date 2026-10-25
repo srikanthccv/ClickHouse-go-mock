@@ -47,9 +47,11 @@ func (b *batch) Append(v ...any) error {
 	for _, ex := range b.ex.expected {
 		if ap, ok := ex.(*ExpectedAppend); ok && !ap.triggered {
 			ap.triggered = true
+
 			break
 		}
 	}
+
 	return b.ex.appendErr
 }
 

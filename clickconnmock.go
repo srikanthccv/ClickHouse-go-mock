@@ -25,7 +25,9 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-type OpError struct { // taken from https://github.com/ClickHouse/clickhouse-go/blob/bfd9f33931482ddacadee5a899b760455b9268e6/clickhouse.go#L51
+// OpError is taken from
+// https://github.com/ClickHouse/clickhouse-go/blob/bfd9f33931482ddacadee5a899b760455b9268e6/clickhouse.go#L51
+type OpError struct {
 	Op         string
 	ColumnName string
 	Err        error
@@ -40,12 +42,14 @@ func (e *OpError) Error() string {
 		if len(err.Hint) != 0 {
 			hint += ". " + err.Hint
 		}
+
 		return fmt.Sprintf("clickhouse [%s]: (%s) converting %s to %s is unsupported%s",
 			err.Op, e.ColumnName,
 			err.From, err.To,
 			hint,
 		)
 	}
+
 	return fmt.Sprintf("clickhouse [%s]: %s", e.Op, e.Err)
 }
 
@@ -139,6 +143,7 @@ func (c *clickhousemock) open(options *clickhouse.Options) (*clickhousemock, err
 	if c.queryMatcher == nil {
 		c.queryMatcher = sqlmock.QueryMatcherRegexp
 	}
+
 	return c, nil
 }
 
@@ -153,6 +158,7 @@ func (c *clickhousemock) MatchExpectationsInOrder(b bool) {
 func (c *clickhousemock) ExpectClose() *ExpectedClose {
 	e := &ExpectedClose{}
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -169,14 +175,19 @@ func (c *clickhousemock) Close() error {
 		delete(c.drv.conns, c.dsn)
 	}
 
-	var expected *ExpectedClose
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedClose
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -185,6 +196,7 @@ func (c *clickhousemock) Close() error {
 		}
 
 		next.Unlock()
+
 		if c.ordered {
 			return fmt.Errorf("call to database Close, was not expected, next expectation is: %s", next)
 		}
@@ -195,17 +207,20 @@ func (c *clickhousemock) Close() error {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return errors.New(msg)
 	}
 
 	expected.triggered = true
 	expected.Unlock()
+
 	return expected.err
 }
 
 func (c *clickhousemock) ExpectStats() *ExpectedStats {
 	e := &ExpectedStats{}
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -214,14 +229,19 @@ func (c *clickhousemock) Stats() driver.Stats {
 	c.drv.Lock()
 	defer c.drv.Unlock()
 
-	var expected *ExpectedStats
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedStats
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -230,6 +250,7 @@ func (c *clickhousemock) Stats() driver.Stats {
 		}
 
 		next.Unlock()
+
 		if c.ordered {
 			panic(fmt.Errorf("call to database Stats, was not expected, next expectation is: %s", next))
 		}
@@ -240,11 +261,13 @@ func (c *clickhousemock) Stats() driver.Stats {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		panic((msg))
 	}
 
 	expected.triggered = true
 	expected.Unlock()
+
 	return expected.stats
 }
 
@@ -257,14 +280,19 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 	c.drv.Lock()
 	defer c.drv.Unlock()
 
-	var expected *ExpectedPing
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedPing
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -273,6 +301,7 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 		}
 
 		next.Unlock()
+
 		if c.ordered {
 			panic(fmt.Errorf("call to database Ping, was not expected, next expectation is: %s", next))
 		}
@@ -283,17 +312,20 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		panic(errors.New(msg))
 	}
 
 	expected.triggered = true
 	expected.Unlock()
+
 	return expected.err
 }
 
 func (c *clickhousemock) ExpectPing() *ExpectedPing {
 	e := &ExpectedPing{}
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -302,6 +334,7 @@ func (c *clickhousemock) ExpectAsyncInsert(expectedSQL string, expectedWait bool
 	e.expectSQL = expectedSQL
 	e.expectWait = expectedWait
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -316,19 +349,24 @@ func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait boo
 			return ctx.Err()
 		}
 	}
+
 	return err
 }
 
 func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait bool) (*ExpectedAsyncInsert, error) {
-	var expected *ExpectedAsyncInsert
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedAsyncInsert
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -338,12 +376,17 @@ func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait boo
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to AsyncInsert statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to AsyncInsert statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedAsyncInsert); ok {
 			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -355,14 +398,17 @@ func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait boo
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("AsyncInsert: %v", err)
 	}
 
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
@@ -370,6 +416,7 @@ func (c *clickhousemock) ExpectExec(expectedSQL string) *ExpectedExec {
 	e := &ExpectedExec{}
 	e.expectSQL = expectedSQL
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -378,14 +425,19 @@ func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) er
 	c.drv.Lock()
 	defer c.drv.Unlock()
 
-	var expected *ExpectedExec
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedExec
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -394,6 +446,7 @@ func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) er
 		}
 
 		next.Unlock()
+
 		if c.ordered {
 			return fmt.Errorf("call to database Exec, was not expected, next expectation is: %s", next)
 		}
@@ -404,27 +457,35 @@ func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) er
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return errors.New(msg)
 	}
 
 	if err := c.queryMatcherFunc().Match(expected.expectSQL, query); err != nil {
 		expected.Unlock()
+
 		return fmt.Errorf("call to database Exec with unexpected query: %s", query)
 	}
 
 	expected.triggered = true
 	expected.Unlock()
+
 	return expected.err
 }
 
 func (c *clickhousemock) ExpectPrepareBatch(expectedSQL string) *ExpectedPrepareBatch {
 	e := &ExpectedPrepareBatch{expectSQL: expectedSQL}
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
 // PrepareBatch meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+func (c *clickhousemock) PrepareBatch(
+	ctx context.Context,
+	query string,
+	opts ...driver.PrepareBatchOption,
+) (driver.Batch, error) {
 	ex, err := c.prepareBatch(ctx, query)
 	if ex != nil {
 		select {
@@ -432,24 +493,30 @@ func (c *clickhousemock) PrepareBatch(ctx context.Context, query string, opts ..
 			if err != nil {
 				return nil, err
 			}
+
 			return &batch{c, ex, query}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
+
 	return nil, err
 }
 
 func (c *clickhousemock) prepareBatch(ctx context.Context, query string) (*ExpectedPrepareBatch, error) {
-	var expected *ExpectedPrepareBatch
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedPrepareBatch
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -459,12 +526,17 @@ func (c *clickhousemock) prepareBatch(ctx context.Context, query string) (*Expec
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to Prepare statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to Prepare statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedPrepareBatch); ok {
 			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -476,14 +548,17 @@ func (c *clickhousemock) prepareBatch(ctx context.Context, query string) (*Expec
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcherFunc().Match(expected.expectSQL, query); err != nil {
 		return nil, err
 	}
 
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
@@ -491,6 +566,7 @@ func (c *clickhousemock) ExpectQueryRow(expectedSQL string) *ExpectedQueryRow {
 	e := &ExpectedQueryRow{}
 	e.expectSQL = expectedSQL
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -500,25 +576,31 @@ func (c *clickhousemock) QueryRow(ctx context.Context, query string, args ...any
 	if ex != nil {
 		ex.row.err = err
 	}
+
 	if ex != nil {
 		select {
 		case <-time.After(ex.delay):
 		case <-ctx.Done():
 		}
 	}
+
 	return ex.row
 }
 
 func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any) (*ExpectedQueryRow, error) {
-	var expected *ExpectedQueryRow
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedQueryRow
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -528,12 +610,17 @@ func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to QueryRow statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to QueryRow statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedQueryRow); ok {
 			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -545,14 +632,17 @@ func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("QueryRow: %v", err)
 	}
 
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
@@ -560,6 +650,7 @@ func (c *clickhousemock) ExpectQuery(expectedSQL string) *ExpectedQuery {
 	e := &ExpectedQuery{}
 	e.expectSQL = expectedSQL
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -572,24 +663,30 @@ func (c *clickhousemock) Query(ctx context.Context, query string, args ...any) (
 			if err != nil {
 				return nil, err
 			}
+
 			return ex.rows, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
+
 	return nil, err
 }
 
 func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (*ExpectedQuery, error) {
-	var expected *ExpectedQuery
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedQuery
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -599,12 +696,17 @@ func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to Query statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to Query statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedQuery); ok {
 			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -616,9 +718,11 @@ func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("Query: %v", err)
 	}
@@ -628,6 +732,7 @@ func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (
 	}
 
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
@@ -635,12 +740,14 @@ func (c *clickhousemock) ExpectSelect(expectedSQL string) *ExpectedSelect {
 	e := &ExpectedSelect{}
 	e.expectSQL = expectedSQL
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
 // Select meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Select(ctx context.Context, dest any, query string, args ...any) error {
-	// Implementation based on that of Select in clickhouse-go https://github.com/ClickHouse/clickhouse-go/blob/main/scan.go#L29
+	// Implementation based on that of Select in clickhouse-go
+	// https://github.com/ClickHouse/clickhouse-go/blob/main/scan.go#L29
 	dstSlicePtr := reflect.ValueOf(dest)
 	if dstSlicePtr.Kind() != reflect.Ptr {
 		return &OpError{
@@ -648,6 +755,7 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 			Err: fmt.Errorf("must pass a pointer, not a value, to Select destination"),
 		}
 	}
+
 	if dstSlicePtr.IsNil() {
 		return &OpError{
 			Op:  "Select",
@@ -659,11 +767,13 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 	if dstSlice.Kind() != reflect.Slice {
 		return fmt.Errorf("must pass a slice to Select destination")
 	}
+
 	if dstSlice.Len() != 0 {
 		// dest should point to empty slice
 		// to make select result correct
 		dstSlice.Set(reflect.MakeSlice(dstSlice.Type(), 0, dstSlice.Cap()))
 	}
+
 	dstSliceElType := dstSlice.Type().Elem()
 
 	ex, err := c.selectQuery(ctx, query)
@@ -675,35 +785,44 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 			}
 
 			defer ex.rows.Close()
+
 			for ex.rows.Next() {
 				elem := reflect.New(dstSliceElType)
 				if err := ex.rows.ScanStruct(elem.Interface()); err != nil {
 					return err
 				}
+
 				dstSlice.Set(reflect.Append(dstSlice, elem.Elem()))
 			}
+
 			if err := ex.rows.Close(); err != nil {
 				return err
 			}
+
 			return ex.rows.Err()
 
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+
 	return err
 }
 
 func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*ExpectedSelect, error) {
-	var expected *ExpectedSelect
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedSelect
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -713,12 +832,17 @@ func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*Expect
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to Select statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to Select statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedSelect); ok {
 			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -730,20 +854,24 @@ func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*Expect
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("Select: %v", err)
 	}
 
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
 func (c *clickhousemock) ExpectServerVersion() *ExpectedServerVersion {
 	e := &ExpectedServerVersion{}
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -753,13 +881,16 @@ func (c *clickhousemock) ServerVersion() (*driver.ServerVersion, error) {
 	c.drv.Lock()
 	defer c.drv.Unlock()
 
-	var expected *ExpectedServerVersion
-	var fulfilled int
-	var ok bool
-	for _, next := range c.expected {
+	var (
+		expected  *ExpectedServerVersion
+		fulfilled int
+		ok        bool
+	)
 
+	for _, next := range c.expected {
 		if next.fulfilled() {
 			fulfilled++
+
 			continue
 		}
 
@@ -768,7 +899,10 @@ func (c *clickhousemock) ServerVersion() (*driver.ServerVersion, error) {
 		}
 
 		if c.ordered {
-			return &driver.ServerVersion{}, fmt.Errorf("call to database ServerVersion, was not expected, next expectation is: %s", next)
+			return &driver.ServerVersion{}, fmt.Errorf(
+				"call to database ServerVersion, was not expected, next expectation is: %s",
+				next,
+			)
 		}
 	}
 
@@ -777,16 +911,19 @@ func (c *clickhousemock) ServerVersion() (*driver.ServerVersion, error) {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return &driver.ServerVersion{}, errors.New(msg)
 	}
 
 	expected.triggered = true
+
 	return &expected.version, expected.err
 }
 
 func (c *clickhousemock) ExpectContributors() *ExpectedContributors {
 	e := &ExpectedContributors{}
 	c.expected = append(c.expected, e)
+
 	return e
 }
 
@@ -795,13 +932,16 @@ func (c *clickhousemock) Contributors() []string {
 	c.drv.Lock()
 	defer c.drv.Unlock()
 
-	var expected *ExpectedContributors
-	var fulfilled int
-	var ok bool
-	for _, next := range c.expected {
+	var (
+		expected  *ExpectedContributors
+		fulfilled int
+		ok        bool
+	)
 
+	for _, next := range c.expected {
 		if next.fulfilled() {
 			fulfilled++
+
 			continue
 		}
 
@@ -819,6 +959,7 @@ func (c *clickhousemock) Contributors() []string {
 	}
 
 	expected.triggered = true
+
 	return expected.contributors
 }
 
@@ -846,5 +987,6 @@ func (c *clickhousemock) ExpectationsWereMet() error {
 			}
 		}
 	}
+
 	return nil
 }

@@ -13,7 +13,11 @@ go build -v ./...                        # what CI runs
 go test -v ./...                         # what CI runs
 go test -run TestPrepareExpectations ./  # single test
 go test -race ./...                      # tests use t.Parallel()
+golangci-lint run ./...                  # CI runs v2.10.0 with .golangci.yml
+golangci-lint run --fix ./...            # autofixes wsl_v5/nlreturn/gofmt
 ```
+
+- Lint is strict (`wsl_v5`, `nlreturn`, `lll` at 120 chars, `gocyclo`, etc.). The clickhouse-go copies (`scan.go`, `struct_map.go`, `rows_column_type.go`) are excluded from linters on purpose.
 
 - CI (`.github/workflows/go.yml`) pins the Go version separately from `go.mod`; bump both together.
 - `examples/` is a **separate Go module** that depends on a published tag (`v0.4.0`) with no `replace` directive, so `./...` from the root does not build it and it does not exercise local changes. To run an example against local code, temporarily add `replace github.com/srikanthccv/ClickHouse-go-mock => ../` in `examples/go.mod`.
@@ -29,7 +33,7 @@ go test -race ./...                      # tests use t.Parallel()
   New `driver.Conn` methods added upstream in clickhouse-go must be implemented here (compile-time assertion `var _ driver.Conn = (*clickhousemock)(nil)` will fail after a dependency bump otherwise).
 - **`expectations.go`** — all `Expected*` types. Each embeds `commonExpectation` (mutex + `triggered` + `err`); query-like ones also embed `queryBasedExpectation` (`expectSQL`, `args`, delay). Builder methods return the receiver for chaining (`WithArgs`, `WillReturnError`, `WillDelayFor`, `WillReturnRows`, …). `ExpectedPrepareBatch` holds its own nested expectation list (`ExpectAppend`, `ExpectSend`, `ExpectFlush`, …) and the error values that `batch.go` returns.
 - **`batch.go`** — `driver.Batch` / `driver.BatchColumn` implementation that simply returns the errors/values configured on the parent `ExpectedPrepareBatch`.
-- **`rows.go`** — `NewRows` / `NewRow` build a real `proto.Block` from `[]ColumnType{Name, Type}` + values, so scanning goes through clickhouse-go's actual column decoders (unsupported types/values `panic` at construction). `WithTimezone` sets the block's server timezone (default UTC) for DateTime columns. `getReflectType` maps ClickHouse type strings to Go `ScanType`s for `ColumnTypes()` — extend it when adding column type support.
+- **`rows.go`** — `NewRows` / `NewRow` build a real `proto.Block` from `[]ColumnType{Name, Type}` + values, so scanning goes through clickhouse-go's actual column decoders (unsupported types/values `panic` at construction). `WithTimezone` sets the block's server timezone (default UTC) for DateTime columns. The `reflectTypes` map (used by `getReflectType`) maps ClickHouse type strings to Go `ScanType`s for `ColumnTypes()` — extend it when adding column type support.
 - **`scan.go`, `rows_column_type.go`, `struct_map.go`** — copied from clickhouse-go (see header comments for source commit) to provide `Scan`/`ScanStruct` and `db:`-tag struct mapping; keep them close to upstream rather than refactoring.
 
 Tests in `clickconnmock_test.go` are the primary usage documentation (per README).
