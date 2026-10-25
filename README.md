@@ -1,5 +1,10 @@
 
 # ClickHouse-go-mock
+[![Go](https://github.com/Kachit/ClickHouse-go-mock/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/Kachit/ClickHouse-go-mock/actions/workflows/go.yml)
+[![Version](https://img.shields.io/github/go-mod/go-version/Kachit/ClickHouse-go-mock)](https://go.dev/doc/devel/release)
+[![Tag](https://img.shields.io/github/v/tag/srikanthccv/ClickHouse-go-mock)](https://github.com/srikanthccv/ClickHouse-go-mock/tags)
+[![License](https://img.shields.io/github/license/Kachit/ClickHouse-go-mock)](LICENSE)
+[![GoDoc](https://pkg.go.dev/badge/github.com/srikanthccv/ClickHouse-go-mock)](https://pkg.go.dev/github.com/srikanthccv/ClickHouse-go-mock)
 
 A mock library implementing support for [clickhouse-go/v2/lib/driver](https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver)
 
