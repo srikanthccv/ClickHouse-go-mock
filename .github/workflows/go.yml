@@ -31,4 +31,9 @@ jobs:
       run: go build -v ./...
 
     - name: Test
-      run: go test -race -v ./...
+      run: go test -race -v -coverprofile=./cover.out -covermode=atomic -coverpkg=./... ./...
+
+    - name: Check test coverage
+      uses: vladopajic/go-test-coverage@v2
+      with:
+        config: ./.testcoverage.yml

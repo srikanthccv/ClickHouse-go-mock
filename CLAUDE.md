@@ -14,6 +14,10 @@ go test -race -v ./...                   # what CI runs (-race needs cgo)
 go test -run TestPrepareExpectations ./  # single test
 golangci-lint run ./...                  # CI runs v2.10.0 with .golangci.yml
 golangci-lint run --fix ./...            # autofixes wsl_v5/nlreturn/gofmt
+
+# coverage gate (CI uses vladopajic/go-test-coverage with .testcoverage.yml)
+go test ./... -coverprofile=cover.out -covermode=atomic -coverpkg=./...
+go run github.com/vladopajic/go-test-coverage/v2@latest --config=./.testcoverage.yml
 ```
 
 - Lint is strict (`wsl_v5`, `nlreturn`, `lll` at 120 chars, `gocyclo`, etc.). The clickhouse-go copies (`scan.go`, `struct_map.go`, `rows_column_type.go`) are excluded from linters on purpose.
