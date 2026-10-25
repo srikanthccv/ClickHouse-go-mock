@@ -41,6 +41,7 @@ type Rows struct {
 	pos       int
 	nextErr   map[int]error
 	closeErr  error
+	closed    bool
 }
 
 func (r *Rows) Next() bool {
@@ -93,6 +94,8 @@ func (r *Rows) ColumnTypes() []driver.ColumnType {
 }
 
 func (r *Rows) Close() error {
+	r.closed = true
+
 	return r.closeErr
 }
 

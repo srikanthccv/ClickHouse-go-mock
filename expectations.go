@@ -73,14 +73,13 @@ type ExpectedQuery struct {
 	rows             *Rows
 	delay            time.Duration
 	rowsMustBeClosed bool
-	rowsWereClosed   bool
 }
 
 // WithArgs will match given expected args to actual database query arguments.
 // if at least one argument does not match, it will return an error. For specific
 // arguments an clickhousemock.Argument interface can be used to match an argument.
 func (e *ExpectedQuery) WithArgs(args ...any) *ExpectedQuery {
-	e.args = args
+	e.setArgs(args)
 
 	return e
 }
@@ -152,7 +151,7 @@ type ExpectedExec struct {
 // if at least one argument does not match, it will return an error. For specific
 // arguments an clickhousemock.Argument interface can be used to match an argument.
 func (e *ExpectedExec) WithArgs(args ...any) *ExpectedExec {
-	e.args = args
+	e.setArgs(args)
 
 	return e
 }
@@ -203,6 +202,21 @@ type queryBasedExpectation struct {
 	commonExpectation
 	expectSQL string
 	args      []any
+	withArgs  bool
+}
+
+func (e *queryBasedExpectation) setArgs(args []any) {
+	e.args = args
+	e.withArgs = true
+}
+
+// matchArgsIfSet matches args only when WithArgs was called on the expectation.
+func (e *queryBasedExpectation) matchArgsIfSet(args []any) error {
+	if !e.withArgs {
+		return nil
+	}
+
+	return e.matchArgs(args)
 }
 
 func (e *queryBasedExpectation) matchArgs(args []any) error {
@@ -280,7 +294,7 @@ type ExpectedPrepareBatch struct {
 	sendErr         error
 	closeErr        error
 	mustBeSent      bool
-	wasClosed       bool
+	wasSent         bool
 	delay           time.Duration
 	rows            int
 	isSent          bool
@@ -301,8 +315,8 @@ func (e *ExpectedPrepareBatch) WillDelayFor(duration time.Duration) *ExpectedPre
 	return e
 }
 
-// WillBeSent expects this prepared batch statement to
-// be set with sent.
+// WillBeSent expects Send() to be called successfully on this
+// prepared batch statement; checked by ExpectationsWereMet.
 func (e *ExpectedPrepareBatch) WillBeSent() *ExpectedPrepareBatch {
 	e.mustBeSent = true
 
@@ -497,7 +511,6 @@ type ExpectedIsSent struct {
 func (e *ExpectedIsSent) WillReturnBool(b bool) *ExpectedIsSent {
 	e.isSent = b
 	e.expBatch.isSent = b
-	e.expBatch.mustBeSent = b
 
 	return e
 }
@@ -635,10 +648,16 @@ func (e *ExpectedAsyncInsert) String() string {
 }
 
 type ExpectedQueryRow struct {
-	commonExpectation
-	expectSQL string
-	row       *Row
-	delay     time.Duration
+	queryBasedExpectation
+	row   *Row
+	delay time.Duration
+}
+
+// WithArgs will match given expected args to actual QueryRow arguments.
+func (e *ExpectedQueryRow) WithArgs(args ...any) *ExpectedQueryRow {
+	e.setArgs(args)
+
+	return e
 }
 
 // WillReturnRow allows to set a row for the expected *Conn.QueryRow action.
@@ -649,7 +668,6 @@ func (e *ExpectedQueryRow) WillReturnRow(row *Row) *ExpectedQueryRow {
 }
 
 func (e *ExpectedQueryRow) WillReturnError(err error) *ExpectedQueryRow {
-	e.row.err = err
 	e.err = err
 
 	return e
@@ -667,10 +685,16 @@ func (e *ExpectedQueryRow) String() string {
 }
 
 type ExpectedSelect struct {
-	commonExpectation
-	expectSQL string
-	delay     time.Duration
-	rows      *Rows
+	queryBasedExpectation
+	delay time.Duration
+	rows  *Rows
+}
+
+// WithArgs will match given expected args to actual Select arguments.
+func (e *ExpectedSelect) WithArgs(args ...any) *ExpectedSelect {
+	e.setArgs(args)
+
+	return e
 }
 
 func (e *ExpectedSelect) WillReturnRows(rows *Rows) *ExpectedSelect {

@@ -68,11 +68,15 @@ func (b *batch) Flush() error {
 }
 
 func (b *batch) Send() error {
+	if b.ex.sendErr == nil {
+		b.ex.wasSent = true
+	}
+
 	return b.ex.sendErr
 }
 
 func (b *batch) IsSent() bool {
-	return b.ex.mustBeSent
+	return b.ex.wasSent || b.ex.isSent
 }
 
 func (b *batch) Rows() int {

@@ -694,3 +694,270 @@ func TestUnexpectedStatsReportedByExpectationsWereMet(t *testing.T) {
 		t.Error("an error was expected for unexpected Stats call, but got none")
 	}
 }
+
+func TestQueryRowWithoutExpectationReturnsError(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	row := mock.QueryRow(context.Background(), "SELECT 1")
+	if row.Err() == nil {
+		t.Error("an error was expected for unexpected QueryRow, but got none")
+	}
+
+	var id int32
+	if err := row.Scan(&id); err == nil {
+		t.Error("an error was expected when scanning an unexpected QueryRow, but got none")
+	}
+}
+
+func TestQueryRowWithoutRowReturnsNoRows(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectQueryRow("SELECT 1")
+
+	var id int32
+	if err := mock.QueryRow(context.Background(), "SELECT 1").Scan(&id); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("sql.ErrNoRows was expected, got %v", err)
+	}
+}
+
+func TestQueryRowWillReturnErrorBeforeRow(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectQueryRow("SELECT 1").WillReturnError(errors.New("some error"))
+
+	if err := mock.QueryRow(context.Background(), "SELECT 1").Err(); err == nil || err.Error() != "some error" {
+		t.Errorf("'some error' was expected, got %v", err)
+	}
+}
+
+func TestQueryRowArgsMismatch(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	row := NewRow([]ColumnType{{Name: "id", Type: "Int32"}}, []any{int32(1)})
+	mock.ExpectQueryRow("SELECT id FROM articles WHERE id = ?").WithArgs(1).WillReturnRow(row)
+
+	if err := mock.QueryRow(context.Background(), "SELECT id FROM articles WHERE id = ?", 2).Err(); err == nil {
+		t.Error("an error was expected for mismatched QueryRow arguments, but got none")
+	}
+}
+
+func TestQueryWithoutRowsReturnsEmptyRows(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectQuery("SELECT 1")
+
+	rows, err := mock.Query(context.Background(), "SELECT 1")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when querying", err)
+	}
+
+	if rows.Next() {
+		t.Error("no rows were expected")
+	}
+}
+
+func TestQueryRowsWillBeClosed(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectQuery("SELECT 1").RowsWillBeClosed()
+	mock.ExpectQuery("SELECT 2").RowsWillBeClosed()
+
+	rows, err := mock.Query(context.Background(), "SELECT 1")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when querying", err)
+	}
+
+	if err := rows.Close(); err != nil {
+		t.Fatalf("an error '%s' was not expected when closing rows", err)
+	}
+
+	if _, err := mock.Query(context.Background(), "SELECT 2"); err != nil {
+		t.Fatalf("an error '%s' was not expected when querying", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err == nil {
+		t.Error("an error was expected for unclosed rows of the second query, but got none")
+	}
+}
+
+func TestQueryUnorderedMatchesArgs(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectQuery("SELECT * FROM articles WHERE id = ?").WithArgs(1)
+	mock.ExpectQuery("SELECT * FROM articles WHERE id = ?").WithArgs(2)
+
+	for _, id := range []int{2, 1} {
+		if _, err := mock.Query(context.Background(), "SELECT * FROM articles WHERE id = ?", id); err != nil {
+			t.Errorf("an error '%s' was not expected when querying id %d", err, id)
+		}
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestSelectWithoutRowsReturnsEmpty(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectSelect("SELECT id FROM articles")
+
+	var dest []struct {
+		ID int32 `ch:"id"`
+	}
+	if err := mock.Select(context.Background(), &dest, "SELECT id FROM articles"); err != nil {
+		t.Errorf("an error '%s' was not expected when selecting", err)
+	}
+
+	if len(dest) != 0 {
+		t.Errorf("empty result was expected, got %d items", len(dest))
+	}
+}
+
+func TestSelectArgsMismatch(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectSelect("SELECT id FROM articles WHERE id = ?").WithArgs(1)
+
+	var dest []struct {
+		ID int32 `ch:"id"`
+	}
+	if err := mock.Select(context.Background(), &dest, "SELECT id FROM articles WHERE id = ?", 2); err == nil {
+		t.Error("an error was expected for mismatched Select arguments, but got none")
+	}
+}
+
+func TestExecArgsMismatch(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectExec("DELETE FROM articles WHERE id = ?").WithArgs(1)
+
+	if err := mock.Exec(context.Background(), "DELETE FROM articles WHERE id = ?", 2); err == nil {
+		t.Error("an error was expected for mismatched Exec arguments, but got none")
+	}
+}
+
+func TestExecUnordered(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectExec("DELETE FROM articles")
+	mock.ExpectExec("DELETE FROM videos")
+
+	for _, query := range []string{"DELETE FROM videos", "DELETE FROM articles"} {
+		if err := mock.Exec(context.Background(), query); err != nil {
+			t.Errorf("an error '%s' was not expected when executing %q", err, query)
+		}
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestAsyncInsertWaitMismatch(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectAsyncInsert("INSERT INTO articles VALUES (1)", true)
+
+	if err := mock.AsyncInsert(context.Background(), "INSERT INTO articles VALUES (1)", false); err == nil {
+		t.Error("an error was expected for mismatched AsyncInsert wait, but got none")
+	}
+}
+
+func TestBatchWillBeSent(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectPrepareBatch("INSERT INTO articles").WillBeSent()
+
+	batch, err := mock.PrepareBatch(context.Background(), "INSERT INTO articles")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when preparing a batch", err)
+	}
+
+	if batch.IsSent() {
+		t.Error("batch was not expected to be sent before Send")
+	}
+
+	if err := mock.ExpectationsWereMet(); err == nil {
+		t.Error("an error was expected for unsent batch, but got none")
+	}
+
+	if err := batch.Send(); err != nil {
+		t.Fatalf("an error '%s' was not expected when sending a batch", err)
+	}
+
+	if !batch.IsSent() {
+		t.Error("batch was expected to be sent after Send")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}

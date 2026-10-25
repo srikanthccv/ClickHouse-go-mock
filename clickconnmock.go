@@ -347,7 +347,7 @@ func (c *clickhousemock) ExpectAsyncInsert(expectedSQL string, expectedWait bool
 }
 
 // AsyncInsert meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
+func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool, _ ...any) error {
 	ex, err := c.asyncInsert(ctx, query, wait)
 	if ex != nil {
 		select {
@@ -392,7 +392,7 @@ func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait boo
 		}
 
 		if pr, ok := next.(*ExpectedAsyncInsert); ok {
-			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.expectWait == wait {
 				expected = pr
 
 				break
@@ -413,6 +413,10 @@ func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait boo
 
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("AsyncInsert: %v", err)
+	}
+
+	if expected.expectWait != wait {
+		return nil, fmt.Errorf("AsyncInsert: '%s' expected wait=%t, got wait=%t", query, expected.expectWait, wait)
 	}
 
 	expected.triggered = true
@@ -449,15 +453,24 @@ func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) er
 			continue
 		}
 
-		if expected, ok = next.(*ExpectedExec); ok {
-			break
-		}
-
-		next.Unlock()
-
 		if c.ordered {
+			if expected, ok = next.(*ExpectedExec); ok {
+				break
+			}
+
+			next.Unlock()
+
 			return fmt.Errorf("call to database Exec, was not expected, next expectation is: %s", next)
 		}
+
+		if pr, ok := next.(*ExpectedExec); ok {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.matchArgsIfSet(args) == nil {
+				expected = pr
+
+				break
+			}
+		}
+		next.Unlock()
 	}
 
 	if expected == nil {
@@ -473,6 +486,12 @@ func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) er
 		expected.Unlock()
 
 		return fmt.Errorf("call to database Exec with unexpected query: %s", query)
+	}
+
+	if err := expected.matchArgsIfSet(args); err != nil {
+		expected.Unlock()
+
+		return fmt.Errorf("Exec: '%s' arguments do not match: %s", query, err)
 	}
 
 	expected.triggered = true
@@ -581,15 +600,19 @@ func (c *clickhousemock) ExpectQueryRow(expectedSQL string) *ExpectedQueryRow {
 // QueryRow meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
 	ex, err := c.queryRow(ctx, query, args...)
-	if ex != nil {
-		ex.row.err = err
+	if ex == nil {
+		return &Row{err: err}
 	}
 
-	if ex != nil {
-		select {
-		case <-time.After(ex.delay):
-		case <-ctx.Done():
-		}
+	if ex.row == nil {
+		ex.row = NewRow(nil, nil)
+	}
+
+	ex.row.err = err
+
+	select {
+	case <-time.After(ex.delay):
+	case <-ctx.Done():
 	}
 
 	return ex.row
@@ -626,7 +649,7 @@ func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any
 		}
 
 		if pr, ok := next.(*ExpectedQueryRow); ok {
-			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.matchArgsIfSet(args) == nil {
 				expected = pr
 
 				break
@@ -647,6 +670,10 @@ func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any
 
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("QueryRow: %v", err)
+	}
+
+	if err := expected.matchArgsIfSet(args); err != nil {
+		return nil, fmt.Errorf("QueryRow: '%s' arguments do not match: %s", query, err)
 	}
 
 	expected.triggered = true
@@ -670,6 +697,10 @@ func (c *clickhousemock) Query(ctx context.Context, query string, args ...any) (
 		case <-time.After(ex.delay):
 			if err != nil {
 				return nil, err
+			}
+
+			if ex.rows == nil {
+				ex.rows = NewRows(nil, nil)
 			}
 
 			return ex.rows, nil
@@ -712,7 +743,7 @@ func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (
 		}
 
 		if pr, ok := next.(*ExpectedQuery); ok {
-			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.matchArgs(args) == nil {
 				expected = pr
 
 				break
@@ -784,12 +815,16 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 
 	dstSliceElType := dstSlice.Type().Elem()
 
-	ex, err := c.selectQuery(ctx, query)
+	ex, err := c.selectQuery(ctx, query, args...)
 	if ex != nil {
 		select {
 		case <-time.After(ex.delay):
 			if err != nil {
 				return err
+			}
+
+			if ex.rows == nil {
+				return nil
 			}
 
 			defer ex.rows.Close()
@@ -817,7 +852,7 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 	return err
 }
 
-func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*ExpectedSelect, error) {
+func (c *clickhousemock) selectQuery(ctx context.Context, query string, args ...any) (*ExpectedSelect, error) {
 	var (
 		expected  *ExpectedSelect
 		fulfilled int
@@ -848,7 +883,7 @@ func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*Expect
 		}
 
 		if pr, ok := next.(*ExpectedSelect); ok {
-			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.matchArgsIfSet(args) == nil {
 				expected = pr
 
 				break
@@ -869,6 +904,10 @@ func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*Expect
 
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("Select: %v", err)
+	}
+
+	if err := expected.matchArgsIfSet(args); err != nil {
+		return nil, fmt.Errorf("Select: '%s' arguments do not match: %s", query, err)
 	}
 
 	expected.triggered = true
@@ -989,16 +1028,16 @@ func (c *clickhousemock) ExpectationsWereMet() error {
 			return fmt.Errorf("there is a remaining expectation which was not matched: %s", e)
 		}
 
-		// for expected prepared statement check whether it was closed if expected
+		// for expected prepared statement check whether it was sent if expected
 		if prep, ok := e.(*ExpectedPrepareBatch); ok {
-			if prep.mustBeSent && !prep.wasClosed {
-				return fmt.Errorf("expected prepared statement to be closed, but it was not: %s", prep)
+			if prep.mustBeSent && !prep.wasSent {
+				return fmt.Errorf("expected prepared statement to be sent, but it was not: %s", prep)
 			}
 		}
 
 		// must check whether all expected queried rows are closed
 		if query, ok := e.(*ExpectedQuery); ok {
-			if query.rowsMustBeClosed && !query.rowsWereClosed {
+			if query.rowsMustBeClosed && (query.rows == nil || !query.rows.closed) {
 				return fmt.Errorf("expected query rows to be closed, but it was not: %s", query)
 			}
 		}
