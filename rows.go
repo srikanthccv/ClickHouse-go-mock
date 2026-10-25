@@ -94,6 +94,10 @@ func (r *Rows) Err() error {
 	return nil
 }
 
+func (r *Rows) HasData() bool {
+	return r.pos < len(r.values)
+}
+
 type Row struct {
 	err  error
 	rows *Rows

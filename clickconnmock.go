@@ -14,6 +14,7 @@ package mockhouse
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -194,7 +195,7 @@ func (c *clickhousemock) Close() error {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		return fmt.Errorf(msg)
+		return errors.New(msg)
 	}
 
 	expected.triggered = true
@@ -282,7 +283,7 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		panic(fmt.Errorf(msg))
+		panic(errors.New(msg))
 	}
 
 	expected.triggered = true
@@ -403,7 +404,7 @@ func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) er
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		return fmt.Errorf(msg)
+		return errors.New(msg)
 	}
 
 	if err := c.queryMatcherFunc().Match(expected.expectSQL, query); err != nil {
@@ -776,7 +777,7 @@ func (c *clickhousemock) ServerVersion() (*driver.ServerVersion, error) {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		return &driver.ServerVersion{}, fmt.Errorf(msg)
+		return &driver.ServerVersion{}, errors.New(msg)
 	}
 
 	expected.triggered = true
