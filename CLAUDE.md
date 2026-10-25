@@ -19,7 +19,7 @@ golangci-lint run --fix ./...            # autofixes wsl_v5/nlreturn/gofmt
 
 - Lint is strict (`wsl_v5`, `nlreturn`, `lll` at 120 chars, `gocyclo`, etc.). The clickhouse-go copies (`scan.go`, `struct_map.go`, `rows_column_type.go`) are excluded from linters on purpose.
 
-- CI (`.github/workflows/go.yml`) pins the Go version separately from `go.mod`; bump both together.
+- CI (`.github/workflows/go.yml`) runs on every branch and reads the Go version from `go.mod` (`go-version-file`).
 - `examples/` is a **separate Go module** that depends on a published tag (`v0.4.0`) with no `replace` directive, so `./...` from the root does not build it and it does not exercise local changes. To run an example against local code, temporarily add `replace github.com/srikanthccv/ClickHouse-go-mock => ../` in `examples/go.mod`.
 
 ## Architecture
