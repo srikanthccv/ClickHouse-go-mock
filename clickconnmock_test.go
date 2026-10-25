@@ -18,6 +18,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
 func TestPrepareExpectations(t *testing.T) {
@@ -652,5 +654,43 @@ func TestQueryReturnRowCustomError(t *testing.T) {
 
 	if err.Error() != "some error" {
 		t.Errorf("expected error to be some error, but got %s", err)
+	}
+}
+
+func TestUnexpectedPingReturnsError(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.monitorPings = true
+
+	if err := mock.Ping(context.Background()); err == nil {
+		t.Error("an error was expected for unexpected Ping, but got none")
+	}
+
+	mock.ExpectExec("DELETE FROM articles")
+
+	if err := mock.Ping(context.Background()); err == nil {
+		t.Error("an error was expected for out of order Ping, but got none")
+	}
+}
+
+func TestUnexpectedStatsReportedByExpectationsWereMet(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	if stats := mock.Stats(); stats != (driver.Stats{}) {
+		t.Errorf("empty stats were expected for unexpected Stats call, got %+v", stats)
+	}
+
+	if err := mock.ExpectationsWereMet(); err == nil {
+		t.Error("an error was expected for unexpected Stats call, but got none")
 	}
 }

@@ -134,6 +134,9 @@ type clickhousemock struct {
 	monitorPings bool
 
 	expected []expectation
+	// errors from unexpected calls to methods that cannot return one (e.g. Stats);
+	// reported by ExpectationsWereMet
+	unexpectedCalls []error
 }
 
 var _ ClickConnMockCommon = (*clickhousemock)(nil)
@@ -252,7 +255,10 @@ func (c *clickhousemock) Stats() driver.Stats {
 		next.Unlock()
 
 		if c.ordered {
-			panic(fmt.Errorf("call to database Stats, was not expected, next expectation is: %s", next))
+			c.unexpectedCalls = append(c.unexpectedCalls,
+				fmt.Errorf("call to database Stats, was not expected, next expectation is: %s", next))
+
+			return driver.Stats{}
 		}
 	}
 
@@ -262,7 +268,9 @@ func (c *clickhousemock) Stats() driver.Stats {
 			msg = "all expectations were already fulfilled, " + msg
 		}
 
-		panic((msg))
+		c.unexpectedCalls = append(c.unexpectedCalls, errors.New(msg))
+
+		return driver.Stats{}
 	}
 
 	expected.triggered = true
@@ -303,7 +311,7 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 		next.Unlock()
 
 		if c.ordered {
-			panic(fmt.Errorf("call to database Ping, was not expected, next expectation is: %s", next))
+			return fmt.Errorf("call to database Ping, was not expected, next expectation is: %s", next)
 		}
 	}
 
@@ -313,7 +321,7 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 			msg = "all expectations were already fulfilled, " + msg
 		}
 
-		panic(errors.New(msg))
+		return errors.New(msg)
 	}
 
 	expected.triggered = true
@@ -964,6 +972,14 @@ func (c *clickhousemock) Contributors() []string {
 }
 
 func (c *clickhousemock) ExpectationsWereMet() error {
+	c.drv.Lock()
+	err := errors.Join(c.unexpectedCalls...)
+	c.drv.Unlock()
+
+	if err != nil {
+		return err
+	}
+
 	for _, e := range c.expected {
 		e.Lock()
 		fulfilled := e.fulfilled()
