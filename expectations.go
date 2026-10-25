@@ -43,6 +43,10 @@ func (e *commonExpectation) fulfilled() bool {
 	return e.triggered
 }
 
+func (e *commonExpectation) markTriggered() {
+	e.triggered = true
+}
+
 // ExpectedClose is used to manage *driver.Conn.Close expectation
 // returned by *clickhousemock.ExpectClose.
 type ExpectedClose struct {
@@ -555,6 +559,28 @@ func (e *ExpectedPrepareBatch) ExpectClose() *ExpectedBatchClose {
 	e.expected = append(e.expected, eq)
 
 	return eq
+}
+
+// unmetError reports an unsent batch or a nested batch expectation that was not matched.
+func (e *ExpectedPrepareBatch) unmetError() error {
+	e.Lock()
+	defer e.Unlock()
+
+	if e.mustBeSent && !e.wasSent {
+		return fmt.Errorf("expected prepared statement to be sent, but it was not: %s", e)
+	}
+
+	for _, ex := range e.expected {
+		ex.Lock()
+		done := ex.fulfilled()
+		ex.Unlock()
+
+		if !done {
+			return fmt.Errorf("there is a remaining batch expectation which was not matched: %s", ex)
+		}
+	}
+
+	return nil
 }
 
 // String returns string representation

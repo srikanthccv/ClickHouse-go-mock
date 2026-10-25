@@ -17,9 +17,12 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 )
 
 func TestPrepareExpectations(t *testing.T) {
@@ -959,5 +962,625 @@ func TestBatchWillBeSent(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestBatchUnmetExpectations(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	eb := mock.ExpectPrepareBatch("INSERT INTO articles")
+	eb.ExpectAppend()
+	eb.ExpectSend()
+
+	batch, err := mock.PrepareBatch(context.Background(), "INSERT INTO articles")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when preparing a batch", err)
+	}
+
+	if err := batch.Append(1); err != nil {
+		t.Fatalf("an error '%s' was not expected when appending to a batch", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err == nil {
+		t.Error("an error was expected for the unmet Send expectation, but got none")
+	}
+
+	if err := batch.Send(); err != nil {
+		t.Fatalf("an error '%s' was not expected when sending a batch", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestBatchAllExpectationsMet(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	eb := mock.ExpectPrepareBatch("INSERT INTO articles")
+	eb.ExpectAppendStruct()
+	eb.ExpectFlush()
+	eb.ExpectIsSent()
+	eb.ExpectAbort()
+	eb.ExpectClose()
+
+	batch, err := mock.PrepareBatch(context.Background(), "INSERT INTO articles")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when preparing a batch", err)
+	}
+
+	if err := batch.AppendStruct(struct{}{}); err != nil {
+		t.Errorf("an error '%s' was not expected when appending a struct", err)
+	}
+
+	if err := batch.Flush(); err != nil {
+		t.Errorf("an error '%s' was not expected when flushing", err)
+	}
+
+	_ = batch.IsSent()
+
+	if err := batch.Abort(); err != nil {
+		t.Errorf("an error '%s' was not expected when aborting", err)
+	}
+
+	if err := batch.Close(); err != nil {
+		t.Errorf("an error '%s' was not expected when closing", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestBatchExpectColumnReturnsBatchColumn(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	want := batchcolumn{query: "custom"}
+	mock.ExpectPrepareBatch("INSERT INTO articles").ExpectColumn().WillReturnBatchColumn(want)
+
+	batch, err := mock.PrepareBatch(context.Background(), "INSERT INTO articles")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when preparing a batch", err)
+	}
+
+	if got := batch.Column(0); got != want {
+		t.Errorf("configured batch column %+v was expected, got %+v", want, got)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestConcurrentUnorderedCalls(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.MatchExpectationsInOrder(false)
+
+	const n = 20
+
+	for i := range n {
+		mock.ExpectExec("DELETE FROM articles WHERE id = ?").WithArgs(i)
+		mock.ExpectQuery("SELECT id FROM articles WHERE id = ?").WithArgs(i)
+		mock.ExpectQueryRow("SELECT title FROM articles WHERE id = ?").WithArgs(i)
+		mock.ExpectSelect("SELECT * FROM articles WHERE id = ?").WithArgs(i)
+		mock.ExpectPrepareBatch("INSERT INTO articles").ExpectSend()
+	}
+
+	ctx := context.Background()
+	errs := make(chan error, n*5)
+
+	var wg sync.WaitGroup
+
+	for i := range n {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			errs <- mock.Exec(ctx, "DELETE FROM articles WHERE id = ?", i)
+
+			_, err := mock.Query(ctx, "SELECT id FROM articles WHERE id = ?", i)
+			errs <- err
+
+			errs <- mock.QueryRow(ctx, "SELECT title FROM articles WHERE id = ?", i).Err()
+
+			var dest []struct{}
+			errs <- mock.Select(ctx, &dest, "SELECT * FROM articles WHERE id = ?", i)
+
+			batch, err := mock.PrepareBatch(ctx, "INSERT INTO articles")
+			if err == nil {
+				err = batch.Send()
+			}
+			errs <- err
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("an error '%s' was not expected", err)
+		}
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestConcurrentBatchAndServerCalls(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.MatchExpectationsInOrder(false)
+
+	const n = 20
+
+	eb := mock.ExpectPrepareBatch("INSERT INTO articles")
+	for range n {
+		eb.ExpectAppend()
+	}
+
+	batch, err := mock.PrepareBatch(context.Background(), "INSERT INTO articles")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when preparing a batch", err)
+	}
+
+	var wg sync.WaitGroup
+
+	for i := range n {
+		wg.Add(3)
+
+		go func() {
+			defer wg.Done()
+
+			_ = batch.Append(i)
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			mock.ExpectServerVersion()
+			mock.ExpectContributors()
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			_, _ = mock.ServerVersion()
+			_ = mock.Contributors()
+		}()
+	}
+
+	wg.Wait()
+
+	// calls racing with Expect* may run before their expectation exists;
+	// drain whatever is left so only batch expectations decide the outcome
+	for range n {
+		_, _ = mock.ServerVersion()
+		_ = mock.Contributors()
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestBatchMethodsReturnConfiguredErrors(t *testing.T) {
+	t.Parallel()
+
+	want := errors.New("batch error")
+
+	tests := []struct {
+		name   string
+		expect func(eb *ExpectedPrepareBatch)
+		call   func(b driver.Batch) error
+	}{
+		{"Abort", func(eb *ExpectedPrepareBatch) { eb.ExpectAbort().WillReturnError(want) }, func(b driver.Batch) error { return b.Abort() }},
+		{"Append", func(eb *ExpectedPrepareBatch) { eb.ExpectAppend().WillReturnError(want) }, func(b driver.Batch) error { return b.Append(1) }},
+		{"AppendStruct", func(eb *ExpectedPrepareBatch) { eb.ExpectAppendStruct().WillReturnError(want) }, func(b driver.Batch) error { return b.AppendStruct(struct{}{}) }},
+		{"Flush", func(eb *ExpectedPrepareBatch) { eb.ExpectFlush().WillReturnError(want) }, func(b driver.Batch) error { return b.Flush() }},
+		{"Send", func(eb *ExpectedPrepareBatch) { eb.ExpectSend().WillReturnError(want) }, func(b driver.Batch) error { return b.Send() }},
+		{"Close", func(eb *ExpectedPrepareBatch) { eb.ExpectClose().WillReturnError(want) }, func(b driver.Batch) error { return b.Close() }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock, err := NewClickHouseNative(nil)
+			if err != nil {
+				t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+			}
+
+			tt.expect(mock.ExpectPrepareBatch("INSERT INTO articles"))
+
+			batch, err := mock.PrepareBatch(context.Background(), "INSERT INTO articles")
+			if err != nil {
+				t.Fatalf("an error '%s' was not expected when preparing a batch", err)
+			}
+
+			if err := tt.call(batch); !errors.Is(err, want) {
+				t.Errorf("error %v was expected, got %v", want, err)
+			}
+
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("there were unfulfilled expectations: %s", err)
+			}
+		})
+	}
+}
+
+func TestBatchFailedSendIsNotSent(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectPrepareBatch("INSERT INTO articles").WillBeSent().ExpectSend().WillReturnError(errors.New("send failed"))
+
+	batch, err := mock.PrepareBatch(context.Background(), "INSERT INTO articles")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when preparing a batch", err)
+	}
+
+	if err := batch.Send(); err == nil {
+		t.Fatal("an error was expected when sending a batch, but got none")
+	}
+
+	if batch.IsSent() {
+		t.Error("batch was not expected to be sent after a failed Send")
+	}
+
+	if err := mock.ExpectationsWereMet(); err == nil {
+		t.Error("an error was expected for a batch that was never sent, but got none")
+	}
+}
+
+func TestBatchIsSentWillReturnBool(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	mock.ExpectPrepareBatch("INSERT INTO articles").ExpectIsSent().WillReturnBool(true)
+
+	batch, err := mock.PrepareBatch(context.Background(), "INSERT INTO articles")
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when preparing a batch", err)
+	}
+
+	if !batch.IsSent() {
+		t.Error("IsSent was expected to return the configured value true")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestOrderedModeRejectsOutOfOrderCalls(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		call func(m *clickhousemock) error
+	}{
+		{"Query", func(m *clickhousemock) error {
+			_, err := m.Query(ctx, "SELECT 1")
+
+			return err
+		}},
+		{"QueryRow", func(m *clickhousemock) error { return m.QueryRow(ctx, "SELECT 1").Err() }},
+		{"Select", func(m *clickhousemock) error {
+			var d []struct{}
+
+			return m.Select(ctx, &d, "SELECT 1")
+		}},
+		{"PrepareBatch", func(m *clickhousemock) error {
+			_, err := m.PrepareBatch(ctx, "INSERT")
+
+			return err
+		}},
+		{"AsyncInsert", func(m *clickhousemock) error { return m.AsyncInsert(ctx, "INSERT", false) }},
+		{"ServerVersion", func(m *clickhousemock) error {
+			_, err := m.ServerVersion()
+
+			return err
+		}},
+		{"Close", func(m *clickhousemock) error { return m.Close() }},
+		{"Stats", func(m *clickhousemock) error {
+			m.Stats()
+
+			return m.ExpectationsWereMet()
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock, err := NewClickHouseNative(nil)
+			if err != nil {
+				t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+			}
+
+			mock.ExpectExec("DELETE FROM articles")
+
+			if err := tt.call(mock); err == nil {
+				t.Errorf("an error was expected for %s while Exec is the next expectation, but got none", tt.name)
+			}
+		})
+	}
+}
+
+func TestContextCancelledDuringDelay(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		expect func(m *clickhousemock)
+		call   func(ctx context.Context, m *clickhousemock) error
+	}{
+		{
+			"Query",
+			func(m *clickhousemock) { m.ExpectQuery("SELECT 1").WillDelayFor(time.Minute) },
+			func(ctx context.Context, m *clickhousemock) error {
+				_, err := m.Query(ctx, "SELECT 1")
+
+				return err
+			},
+		},
+		{
+			"Select",
+			func(m *clickhousemock) { m.ExpectSelect("SELECT 1").WillDelay(time.Minute) },
+			func(ctx context.Context, m *clickhousemock) error {
+				var d []struct{}
+
+				return m.Select(ctx, &d, "SELECT 1")
+			},
+		},
+		{
+			"PrepareBatch",
+			func(m *clickhousemock) { m.ExpectPrepareBatch("INSERT").WillDelayFor(time.Minute) },
+			func(ctx context.Context, m *clickhousemock) error {
+				_, err := m.PrepareBatch(ctx, "INSERT")
+
+				return err
+			},
+		},
+		{
+			"AsyncInsert",
+			func(m *clickhousemock) { m.ExpectAsyncInsert("INSERT", false).WillDelay(time.Minute) },
+			func(ctx context.Context, m *clickhousemock) error { return m.AsyncInsert(ctx, "INSERT", false) },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock, err := NewClickHouseNative(nil)
+			if err != nil {
+				t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+			}
+
+			tt.expect(mock)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			defer cancel()
+
+			if err := tt.call(ctx, mock); !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("context.DeadlineExceeded was expected, got %v", err)
+			}
+		})
+	}
+}
+
+func TestMethodsReturnConfiguredErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	want := errors.New("configured error")
+
+	tests := []struct {
+		name   string
+		expect func(m *clickhousemock)
+		call   func(m *clickhousemock) error
+	}{
+		{
+			"Exec",
+			func(m *clickhousemock) { m.ExpectExec("DELETE").WillReturnError(want) },
+			func(m *clickhousemock) error { return m.Exec(ctx, "DELETE") },
+		},
+		{
+			"Query",
+			func(m *clickhousemock) { m.ExpectQuery("SELECT 1").WillReturnError(want) },
+			func(m *clickhousemock) error {
+				_, err := m.Query(ctx, "SELECT 1")
+
+				return err
+			},
+		},
+		{
+			"Select",
+			func(m *clickhousemock) { m.ExpectSelect("SELECT 1").WillReturnError(want) },
+			func(m *clickhousemock) error {
+				var d []struct{}
+
+				return m.Select(ctx, &d, "SELECT 1")
+			},
+		},
+		{
+			"PrepareBatch",
+			func(m *clickhousemock) { m.ExpectPrepareBatch("INSERT").WillReturnError(want) },
+			func(m *clickhousemock) error {
+				_, err := m.PrepareBatch(ctx, "INSERT")
+
+				return err
+			},
+		},
+		{
+			"AsyncInsert",
+			func(m *clickhousemock) { m.ExpectAsyncInsert("INSERT", false).WillReturnError(want) },
+			func(m *clickhousemock) error { return m.AsyncInsert(ctx, "INSERT", false) },
+		},
+		{
+			"Close",
+			func(m *clickhousemock) { m.ExpectClose().WillReturnError(want) },
+			func(m *clickhousemock) error { return m.Close() },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock, err := NewClickHouseNative(nil)
+			if err != nil {
+				t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+			}
+
+			tt.expect(mock)
+
+			if err := tt.call(mock); !errors.Is(err, want) {
+				t.Errorf("error %v was expected, got %v", want, err)
+			}
+
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("there were unfulfilled expectations: %s", err)
+			}
+		})
+	}
+}
+
+func TestSelectScansRows(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	type article struct {
+		ID    int32  `ch:"id"`
+		Title string `ch:"title"`
+	}
+
+	rows := NewRows(
+		[]ColumnType{{Name: "id", Type: "Int32"}, {Name: "title", Type: "String"}},
+		[][]any{{int32(1), "first"}, {int32(2), "second"}},
+	)
+	mock.ExpectSelect("SELECT id, title FROM articles WHERE id > ?").WithArgs(0).WillReturnRows(rows)
+
+	dest := []article{{ID: 99}}
+	if err := mock.Select(context.Background(), &dest, "SELECT id, title FROM articles WHERE id > ?", 0); err != nil {
+		t.Fatalf("an error '%s' was not expected when selecting", err)
+	}
+
+	want := []article{{ID: 1, Title: "first"}, {ID: 2, Title: "second"}}
+	if !reflect.DeepEqual(dest, want) {
+		t.Errorf("%+v was expected, got %+v", want, dest)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestSelectInvalidDestination(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	var (
+		notSlice int
+		nilPtr   *[]struct{}
+	)
+
+	for name, dest := range map[string]any{
+		"value":       []struct{}{},
+		"nil pointer": nilPtr,
+		"not a slice": &notSlice,
+	} {
+		if err := mock.Select(context.Background(), dest, "SELECT 1"); err == nil {
+			t.Errorf("an error was expected for %s destination, but got none", name)
+		}
+	}
+}
+
+func TestStatsServerVersionContributors(t *testing.T) {
+	t.Parallel()
+
+	mock, err := NewClickHouseNative(nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	stats := driver.Stats{MaxOpenConns: 10, Open: 3}
+	version := proto.ServerHandshake{Name: "ClickHouse", Version: proto.Version{Major: 25, Minor: 3}}
+
+	mock.ExpectStats().WillReturnStats(stats)
+	mock.ExpectServerVersion().WillReturnVersion(version)
+	mock.ExpectContributors().WillReturnContributors("alice", "bob")
+
+	if got := mock.Stats(); got != stats {
+		t.Errorf("stats %+v were expected, got %+v", stats, got)
+	}
+
+	got, err := mock.ServerVersion()
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when getting server version", err)
+	}
+
+	if got.Name != version.Name || got.Version != version.Version {
+		t.Errorf("version %+v was expected, got %+v", version, *got)
+	}
+
+	if got := mock.Contributors(); !reflect.DeepEqual(got, []string{"alice", "bob"}) {
+		t.Errorf("contributors [alice bob] were expected, got %v", got)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+
+	if _, err := mock.ServerVersion(); err == nil {
+		t.Error("an error was expected for unexpected ServerVersion, but got none")
 	}
 }
