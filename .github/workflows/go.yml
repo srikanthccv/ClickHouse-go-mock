@@ -14,6 +14,9 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    permissions:
+      # lets go-test-coverage commit the coverage badge to the badges branch
+      contents: write
     steps:
     - uses: actions/checkout@v7
 
@@ -37,3 +40,6 @@ jobs:
       uses: vladopajic/go-test-coverage@v2
       with:
         config: ./.testcoverage.yml
+        # badge is committed to the orphan `badges` branch on pushes to main only
+        git-token: ${{ github.event_name == 'push' && github.ref_name == 'main' && secrets.GITHUB_TOKEN || '' }}
+        git-branch: badges
