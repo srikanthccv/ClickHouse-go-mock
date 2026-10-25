@@ -14,8 +14,10 @@ package mockhouse
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -24,7 +26,9 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-type OpError struct { // taken from https://github.com/ClickHouse/clickhouse-go/blob/bfd9f33931482ddacadee5a899b760455b9268e6/clickhouse.go#L51
+// OpError is taken from
+// https://github.com/ClickHouse/clickhouse-go/blob/bfd9f33931482ddacadee5a899b760455b9268e6/clickhouse.go#L51
+type OpError struct {
 	Op         string
 	ColumnName string
 	Err        error
@@ -39,12 +43,14 @@ func (e *OpError) Error() string {
 		if len(err.Hint) != 0 {
 			hint += ". " + err.Hint
 		}
+
 		return fmt.Sprintf("clickhouse [%s]: (%s) converting %s to %s is unsupported%s",
 			err.Op, e.ColumnName,
 			err.From, err.To,
 			hint,
 		)
 	}
+
 	return fmt.Sprintf("clickhouse [%s]: %s", e.Op, e.Err)
 }
 
@@ -121,6 +127,9 @@ type ClickConnMockCommon interface {
 }
 
 type clickhousemock struct {
+	// mu guards ordered, expected and unexpectedCalls
+	mu sync.Mutex
+
 	ordered      bool
 	dsn          string
 	opened       int
@@ -129,6 +138,9 @@ type clickhousemock struct {
 	monitorPings bool
 
 	expected []expectation
+	// errors from unexpected calls to methods that cannot return one (e.g. Stats);
+	// reported by ExpectationsWereMet
+	unexpectedCalls []error
 }
 
 var _ ClickConnMockCommon = (*clickhousemock)(nil)
@@ -138,6 +150,7 @@ func (c *clickhousemock) open(options *clickhouse.Options) (*clickhousemock, err
 	if c.queryMatcher == nil {
 		c.queryMatcher = sqlmock.QueryMatcherRegexp
 	}
+
 	return c, nil
 }
 
@@ -146,12 +159,23 @@ func (c *clickhousemock) queryMatcherFunc() sqlmock.QueryMatcher {
 }
 
 func (c *clickhousemock) MatchExpectationsInOrder(b bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.ordered = b
+}
+
+func (c *clickhousemock) addExpectation(e expectation) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.expected = append(c.expected, e)
 }
 
 func (c *clickhousemock) ExpectClose() *ExpectedClose {
 	e := &ExpectedClose{}
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
@@ -160,22 +184,30 @@ func (c *clickhousemock) ExpectClose() *ExpectedClose {
 // there must be an *ExpectedClose expectation satisfied.
 // meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.drv.Lock()
-	defer c.drv.Unlock()
 
 	c.opened--
 	if c.opened == 0 {
 		delete(c.drv.conns, c.dsn)
 	}
+	c.drv.Unlock()
 
-	var expected *ExpectedClose
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedClose
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -184,6 +216,7 @@ func (c *clickhousemock) Close() error {
 		}
 
 		next.Unlock()
+
 		if c.ordered {
 			return fmt.Errorf("call to database Close, was not expected, next expectation is: %s", next)
 		}
@@ -194,33 +227,41 @@ func (c *clickhousemock) Close() error {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		return fmt.Errorf(msg)
+
+		return errors.New(msg)
 	}
 
 	expected.triggered = true
 	expected.Unlock()
+
 	return expected.err
 }
 
 func (c *clickhousemock) ExpectStats() *ExpectedStats {
 	e := &ExpectedStats{}
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
 // Stats meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Stats() driver.Stats {
-	c.drv.Lock()
-	defer c.drv.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	var expected *ExpectedStats
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedStats
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -229,8 +270,12 @@ func (c *clickhousemock) Stats() driver.Stats {
 		}
 
 		next.Unlock()
+
 		if c.ordered {
-			panic(fmt.Errorf("call to database Stats, was not expected, next expectation is: %s", next))
+			c.unexpectedCalls = append(c.unexpectedCalls,
+				fmt.Errorf("call to database Stats, was not expected, next expectation is: %s", next))
+
+			return driver.Stats{}
 		}
 	}
 
@@ -239,11 +284,15 @@ func (c *clickhousemock) Stats() driver.Stats {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		panic((msg))
+
+		c.unexpectedCalls = append(c.unexpectedCalls, errors.New(msg))
+
+		return driver.Stats{}
 	}
 
 	expected.triggered = true
 	expected.Unlock()
+
 	return expected.stats
 }
 
@@ -253,17 +302,22 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 		return nil
 	}
 
-	c.drv.Lock()
-	defer c.drv.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	var expected *ExpectedPing
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedPing
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -272,8 +326,9 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 		}
 
 		next.Unlock()
+
 		if c.ordered {
-			panic(fmt.Errorf("call to database Ping, was not expected, next expectation is: %s", next))
+			return fmt.Errorf("call to database Ping, was not expected, next expectation is: %s", next)
 		}
 	}
 
@@ -282,17 +337,20 @@ func (c *clickhousemock) Ping(ctx context.Context) error {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		panic(fmt.Errorf(msg))
+
+		return errors.New(msg)
 	}
 
 	expected.triggered = true
 	expected.Unlock()
+
 	return expected.err
 }
 
 func (c *clickhousemock) ExpectPing() *ExpectedPing {
 	e := &ExpectedPing{}
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
@@ -300,12 +358,13 @@ func (c *clickhousemock) ExpectAsyncInsert(expectedSQL string, expectedWait bool
 	e := &ExpectedAsyncInsert{}
 	e.expectSQL = expectedSQL
 	e.expectWait = expectedWait
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
 // AsyncInsert meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
+func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait bool, _ ...any) error {
 	ex, err := c.asyncInsert(ctx, query, wait)
 	if ex != nil {
 		select {
@@ -315,19 +374,27 @@ func (c *clickhousemock) AsyncInsert(ctx context.Context, query string, wait boo
 			return ctx.Err()
 		}
 	}
+
 	return err
 }
 
 func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait bool) (*ExpectedAsyncInsert, error) {
-	var expected *ExpectedAsyncInsert
-	var fulfilled int
-	var ok bool
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var (
+		expected  *ExpectedAsyncInsert
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -337,12 +404,17 @@ func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait boo
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to AsyncInsert statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to AsyncInsert statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedAsyncInsert); ok {
-			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.expectWait == wait {
 				expected = pr
+
 				break
 			}
 		}
@@ -354,48 +426,71 @@ func (c *clickhousemock) asyncInsert(ctx context.Context, query string, wait boo
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("AsyncInsert: %v", err)
 	}
 
+	if expected.expectWait != wait {
+		return nil, fmt.Errorf("AsyncInsert: '%s' expected wait=%t, got wait=%t", query, expected.expectWait, wait)
+	}
+
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
 func (c *clickhousemock) ExpectExec(expectedSQL string) *ExpectedExec {
 	e := &ExpectedExec{}
 	e.expectSQL = expectedSQL
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
 // Exec meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) error {
-	c.drv.Lock()
-	defer c.drv.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	var expected *ExpectedExec
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedExec
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
-		if expected, ok = next.(*ExpectedExec); ok {
-			break
-		}
-
-		next.Unlock()
 		if c.ordered {
+			if expected, ok = next.(*ExpectedExec); ok {
+				break
+			}
+
+			next.Unlock()
+
 			return fmt.Errorf("call to database Exec, was not expected, next expectation is: %s", next)
 		}
+
+		if pr, ok := next.(*ExpectedExec); ok {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.matchArgsIfSet(args) == nil {
+				expected = pr
+
+				break
+			}
+		}
+		next.Unlock()
 	}
 
 	if expected == nil {
@@ -403,27 +498,41 @@ func (c *clickhousemock) Exec(ctx context.Context, query string, args ...any) er
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		return fmt.Errorf(msg)
+
+		return errors.New(msg)
 	}
 
 	if err := c.queryMatcherFunc().Match(expected.expectSQL, query); err != nil {
 		expected.Unlock()
+
 		return fmt.Errorf("call to database Exec with unexpected query: %s", query)
+	}
+
+	if err := expected.matchArgsIfSet(args); err != nil {
+		expected.Unlock()
+
+		return fmt.Errorf("Exec: '%s' arguments do not match: %s", query, err)
 	}
 
 	expected.triggered = true
 	expected.Unlock()
+
 	return expected.err
 }
 
 func (c *clickhousemock) ExpectPrepareBatch(expectedSQL string) *ExpectedPrepareBatch {
 	e := &ExpectedPrepareBatch{expectSQL: expectedSQL}
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
 // PrepareBatch meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
-func (c *clickhousemock) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+func (c *clickhousemock) PrepareBatch(
+	ctx context.Context,
+	query string,
+	opts ...driver.PrepareBatchOption,
+) (driver.Batch, error) {
 	ex, err := c.prepareBatch(ctx, query)
 	if ex != nil {
 		select {
@@ -431,24 +540,33 @@ func (c *clickhousemock) PrepareBatch(ctx context.Context, query string, opts ..
 			if err != nil {
 				return nil, err
 			}
+
 			return &batch{c, ex, query}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
+
 	return nil, err
 }
 
 func (c *clickhousemock) prepareBatch(ctx context.Context, query string) (*ExpectedPrepareBatch, error) {
-	var expected *ExpectedPrepareBatch
-	var fulfilled int
-	var ok bool
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var (
+		expected  *ExpectedPrepareBatch
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -458,12 +576,17 @@ func (c *clickhousemock) prepareBatch(ctx context.Context, query string) (*Expec
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to Prepare statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to Prepare statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedPrepareBatch); ok {
 			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -475,49 +598,66 @@ func (c *clickhousemock) prepareBatch(ctx context.Context, query string) (*Expec
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcherFunc().Match(expected.expectSQL, query); err != nil {
 		return nil, err
 	}
 
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
 func (c *clickhousemock) ExpectQueryRow(expectedSQL string) *ExpectedQueryRow {
 	e := &ExpectedQueryRow{}
 	e.expectSQL = expectedSQL
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
 // QueryRow meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
 	ex, err := c.queryRow(ctx, query, args...)
-	if ex != nil {
-		ex.row.err = err
+	if ex == nil {
+		return &Row{err: err}
 	}
-	if ex != nil {
-		select {
-		case <-time.After(ex.delay):
-		case <-ctx.Done():
-		}
+
+	if ex.row == nil {
+		ex.row = NewRow(nil, nil)
 	}
+
+	ex.row.err = err
+
+	select {
+	case <-time.After(ex.delay):
+	case <-ctx.Done():
+	}
+
 	return ex.row
 }
 
 func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any) (*ExpectedQueryRow, error) {
-	var expected *ExpectedQueryRow
-	var fulfilled int
-	var ok bool
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var (
+		expected  *ExpectedQueryRow
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -527,12 +667,17 @@ func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to QueryRow statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to QueryRow statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedQueryRow); ok {
-			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.matchArgsIfSet(args) == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -544,21 +689,29 @@ func (c *clickhousemock) queryRow(ctx context.Context, query string, args ...any
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("QueryRow: %v", err)
 	}
 
+	if err := expected.matchArgsIfSet(args); err != nil {
+		return nil, fmt.Errorf("QueryRow: '%s' arguments do not match: %s", query, err)
+	}
+
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
 func (c *clickhousemock) ExpectQuery(expectedSQL string) *ExpectedQuery {
 	e := &ExpectedQuery{}
 	e.expectSQL = expectedSQL
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
@@ -571,24 +724,37 @@ func (c *clickhousemock) Query(ctx context.Context, query string, args ...any) (
 			if err != nil {
 				return nil, err
 			}
+
+			if ex.rows == nil {
+				ex.rows = NewRows(nil, nil)
+			}
+
 			return ex.rows, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
+
 	return nil, err
 }
 
 func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (*ExpectedQuery, error) {
-	var expected *ExpectedQuery
-	var fulfilled int
-	var ok bool
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var (
+		expected  *ExpectedQuery
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -598,12 +764,17 @@ func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to Query statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to Query statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedQuery); ok {
-			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.matchArgs(args) == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -615,9 +786,11 @@ func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("Query: %v", err)
 	}
@@ -627,19 +800,22 @@ func (c *clickhousemock) query(ctx context.Context, query string, args ...any) (
 	}
 
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
 func (c *clickhousemock) ExpectSelect(expectedSQL string) *ExpectedSelect {
 	e := &ExpectedSelect{}
 	e.expectSQL = expectedSQL
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
 // Select meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Select(ctx context.Context, dest any, query string, args ...any) error {
-	// Implementation based on that of Select in clickhouse-go https://github.com/ClickHouse/clickhouse-go/blob/main/scan.go#L29
+	// Implementation based on that of Select in clickhouse-go
+	// https://github.com/ClickHouse/clickhouse-go/blob/main/scan.go#L29
 	dstSlicePtr := reflect.ValueOf(dest)
 	if dstSlicePtr.Kind() != reflect.Ptr {
 		return &OpError{
@@ -647,6 +823,7 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 			Err: fmt.Errorf("must pass a pointer, not a value, to Select destination"),
 		}
 	}
+
 	if dstSlicePtr.IsNil() {
 		return &OpError{
 			Op:  "Select",
@@ -658,14 +835,16 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 	if dstSlice.Kind() != reflect.Slice {
 		return fmt.Errorf("must pass a slice to Select destination")
 	}
+
 	if dstSlice.Len() != 0 {
 		// dest should point to empty slice
 		// to make select result correct
 		dstSlice.Set(reflect.MakeSlice(dstSlice.Type(), 0, dstSlice.Cap()))
 	}
+
 	dstSliceElType := dstSlice.Type().Elem()
 
-	ex, err := c.selectQuery(ctx, query)
+	ex, err := c.selectQuery(ctx, query, args...)
 	if ex != nil {
 		select {
 		case <-time.After(ex.delay):
@@ -673,36 +852,52 @@ func (c *clickhousemock) Select(ctx context.Context, dest any, query string, arg
 				return err
 			}
 
+			if ex.rows == nil {
+				return nil
+			}
+
 			defer ex.rows.Close()
+
 			for ex.rows.Next() {
 				elem := reflect.New(dstSliceElType)
 				if err := ex.rows.ScanStruct(elem.Interface()); err != nil {
 					return err
 				}
+
 				dstSlice.Set(reflect.Append(dstSlice, elem.Elem()))
 			}
+
 			if err := ex.rows.Close(); err != nil {
 				return err
 			}
+
 			return ex.rows.Err()
 
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+
 	return err
 }
 
-func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*ExpectedSelect, error) {
-	var expected *ExpectedSelect
-	var fulfilled int
-	var ok bool
+func (c *clickhousemock) selectQuery(ctx context.Context, query string, args ...any) (*ExpectedSelect, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var (
+		expected  *ExpectedSelect
+		fulfilled int
+		ok        bool
+	)
 
 	for _, next := range c.expected {
 		next.Lock()
 		if next.fulfilled() {
 			next.Unlock()
+
 			fulfilled++
+
 			continue
 		}
 
@@ -712,12 +907,17 @@ func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*Expect
 			}
 
 			next.Unlock()
-			return nil, fmt.Errorf("call to Select statement with query '%s', was not expected, next expectation is: %s", query, next)
+
+			return nil, fmt.Errorf(
+				"call to Select statement with query '%s', was not expected, next expectation is: %s",
+				query, next,
+			)
 		}
 
 		if pr, ok := next.(*ExpectedSelect); ok {
-			if err := c.queryMatcher.Match(pr.expectSQL, query); err == nil {
+			if c.queryMatcher.Match(pr.expectSQL, query) == nil && pr.matchArgsIfSet(args) == nil {
 				expected = pr
+
 				break
 			}
 		}
@@ -729,36 +929,51 @@ func (c *clickhousemock) selectQuery(ctx context.Context, query string) (*Expect
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
+
 		return nil, fmt.Errorf(msg, query)
 	}
 	defer expected.Unlock()
+
 	if err := c.queryMatcher.Match(expected.expectSQL, query); err != nil {
 		return nil, fmt.Errorf("Select: %v", err)
 	}
 
+	if err := expected.matchArgsIfSet(args); err != nil {
+		return nil, fmt.Errorf("Select: '%s' arguments do not match: %s", query, err)
+	}
+
 	expected.triggered = true
+
 	return expected, expected.err
 }
 
 func (c *clickhousemock) ExpectServerVersion() *ExpectedServerVersion {
 	e := &ExpectedServerVersion{}
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
 // ServerVersion returns the version of the database.
 // meets http://golang.org/pkg/database/sql/driver/#Conn interface
 func (c *clickhousemock) ServerVersion() (*driver.ServerVersion, error) {
-	c.drv.Lock()
-	defer c.drv.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	var expected *ExpectedServerVersion
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedServerVersion
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
+		next.Lock()
+		done := next.fulfilled()
+		next.Unlock()
 
-		if next.fulfilled() {
+		if done {
 			fulfilled++
+
 			continue
 		}
 
@@ -767,7 +982,10 @@ func (c *clickhousemock) ServerVersion() (*driver.ServerVersion, error) {
 		}
 
 		if c.ordered {
-			return &driver.ServerVersion{}, fmt.Errorf("call to database ServerVersion, was not expected, next expectation is: %s", next)
+			return &driver.ServerVersion{}, fmt.Errorf(
+				"call to database ServerVersion, was not expected, next expectation is: %s",
+				next,
+			)
 		}
 	}
 
@@ -776,31 +994,43 @@ func (c *clickhousemock) ServerVersion() (*driver.ServerVersion, error) {
 		if fulfilled == len(c.expected) {
 			msg = "all expectations were already fulfilled, " + msg
 		}
-		return &driver.ServerVersion{}, fmt.Errorf(msg)
+
+		return &driver.ServerVersion{}, errors.New(msg)
 	}
 
+	expected.Lock()
 	expected.triggered = true
+	expected.Unlock()
+
 	return &expected.version, expected.err
 }
 
 func (c *clickhousemock) ExpectContributors() *ExpectedContributors {
 	e := &ExpectedContributors{}
-	c.expected = append(c.expected, e)
+	c.addExpectation(e)
+
 	return e
 }
 
 // Contributors meets https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Conn interface
 func (c *clickhousemock) Contributors() []string {
-	c.drv.Lock()
-	defer c.drv.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	var expected *ExpectedContributors
-	var fulfilled int
-	var ok bool
+	var (
+		expected  *ExpectedContributors
+		fulfilled int
+		ok        bool
+	)
+
 	for _, next := range c.expected {
+		next.Lock()
+		done := next.fulfilled()
+		next.Unlock()
 
-		if next.fulfilled() {
+		if done {
 			fulfilled++
+
 			continue
 		}
 
@@ -817,11 +1047,21 @@ func (c *clickhousemock) Contributors() []string {
 		return []string{}
 	}
 
+	expected.Lock()
 	expected.triggered = true
+	expected.Unlock()
+
 	return expected.contributors
 }
 
 func (c *clickhousemock) ExpectationsWereMet() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := errors.Join(c.unexpectedCalls...); err != nil {
+		return err
+	}
+
 	for _, e := range c.expected {
 		e.Lock()
 		fulfilled := e.fulfilled()
@@ -831,19 +1071,21 @@ func (c *clickhousemock) ExpectationsWereMet() error {
 			return fmt.Errorf("there is a remaining expectation which was not matched: %s", e)
 		}
 
-		// for expected prepared statement check whether it was closed if expected
+		// for expected prepared statement check that it was sent if expected
+		// and that all of its nested expectations were matched
 		if prep, ok := e.(*ExpectedPrepareBatch); ok {
-			if prep.mustBeSent && !prep.wasClosed {
-				return fmt.Errorf("expected prepared statement to be closed, but it was not: %s", prep)
+			if err := prep.unmetError(); err != nil {
+				return err
 			}
 		}
 
 		// must check whether all expected queried rows are closed
 		if query, ok := e.(*ExpectedQuery); ok {
-			if query.rowsMustBeClosed && !query.rowsWereClosed {
+			if query.rowsMustBeClosed && (query.rows == nil || !query.rows.closed) {
 				return fmt.Errorf("expected query rows to be closed, but it was not: %s", query)
 			}
 		}
 	}
+
 	return nil
 }

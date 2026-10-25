@@ -43,6 +43,10 @@ func (e *commonExpectation) fulfilled() bool {
 	return e.triggered
 }
 
+func (e *commonExpectation) markTriggered() {
+	e.triggered = true
+}
+
 // ExpectedClose is used to manage *driver.Conn.Close expectation
 // returned by *clickhousemock.ExpectClose.
 type ExpectedClose struct {
@@ -52,6 +56,7 @@ type ExpectedClose struct {
 // WillReturnError allows to set an error for *driver.Conn.Close action
 func (e *ExpectedClose) WillReturnError(err error) *ExpectedClose {
 	e.err = err
+
 	return e
 }
 
@@ -61,6 +66,7 @@ func (e *ExpectedClose) String() string {
 	if e.err != nil {
 		msg += fmt.Sprintf(", which should return error: %s", e.err)
 	}
+
 	return msg
 }
 
@@ -71,26 +77,28 @@ type ExpectedQuery struct {
 	rows             *Rows
 	delay            time.Duration
 	rowsMustBeClosed bool
-	rowsWereClosed   bool
 }
 
 // WithArgs will match given expected args to actual database query arguments.
 // if at least one argument does not match, it will return an error. For specific
 // arguments an clickhousemock.Argument interface can be used to match an argument.
 func (e *ExpectedQuery) WithArgs(args ...any) *ExpectedQuery {
-	e.args = args
+	e.setArgs(args)
+
 	return e
 }
 
 // RowsWillBeClosed expects this query rows to be closed.
 func (e *ExpectedQuery) RowsWillBeClosed() *ExpectedQuery {
 	e.rowsMustBeClosed = true
+
 	return e
 }
 
 // WillReturnError allows to set an error for expected database query
 func (e *ExpectedQuery) WillReturnError(err error) *ExpectedQuery {
 	e.err = err
+
 	return e
 }
 
@@ -98,12 +106,14 @@ func (e *ExpectedQuery) WillReturnError(err error) *ExpectedQuery {
 // result. May be used together with Context
 func (e *ExpectedQuery) WillDelayFor(duration time.Duration) *ExpectedQuery {
 	e.delay = duration
+
 	return e
 }
 
 // WillReturnRows allows to set rows for expected database query
 func (e *ExpectedQuery) WillReturnRows(rows *Rows) *ExpectedQuery {
 	e.rows = rows
+
 	return e
 }
 
@@ -119,6 +129,7 @@ func (e *ExpectedQuery) String() string {
 		for i, arg := range e.args {
 			msg += fmt.Sprintf("    %d - %+v\n", i, arg)
 		}
+
 		msg = strings.TrimSpace(msg)
 	}
 
@@ -144,13 +155,15 @@ type ExpectedExec struct {
 // if at least one argument does not match, it will return an error. For specific
 // arguments an clickhousemock.Argument interface can be used to match an argument.
 func (e *ExpectedExec) WithArgs(args ...any) *ExpectedExec {
-	e.args = args
+	e.setArgs(args)
+
 	return e
 }
 
 // WillReturnError allows to set an error for expected database exec action
 func (e *ExpectedExec) WillReturnError(err error) *ExpectedExec {
 	e.err = err
+
 	return e
 }
 
@@ -158,6 +171,7 @@ func (e *ExpectedExec) WillReturnError(err error) *ExpectedExec {
 // result. May be used together with Context
 func (e *ExpectedExec) WillDelayFor(duration time.Duration) *ExpectedExec {
 	e.delay = duration
+
 	return e
 }
 
@@ -170,10 +184,12 @@ func (e *ExpectedExec) String() string {
 		msg += "\n  - is without arguments"
 	} else {
 		msg += "\n  - is with arguments:\n"
-		var margs []string
+
+		margs := make([]string, 0, len(e.args))
 		for i, arg := range e.args {
 			margs = append(margs, fmt.Sprintf("    %d - %+v", i, arg))
 		}
+
 		msg += strings.Join(margs, "\n")
 	}
 
@@ -190,6 +206,21 @@ type queryBasedExpectation struct {
 	commonExpectation
 	expectSQL string
 	args      []any
+	withArgs  bool
+}
+
+func (e *queryBasedExpectation) setArgs(args []any) {
+	e.args = args
+	e.withArgs = true
+}
+
+// matchArgsIfSet matches args only when WithArgs was called on the expectation.
+func (e *queryBasedExpectation) matchArgsIfSet(args []any) error {
+	if !e.withArgs {
+		return nil
+	}
+
+	return e.matchArgs(args)
 }
 
 func (e *queryBasedExpectation) matchArgs(args []any) error {
@@ -233,12 +264,14 @@ type ExpectedPing struct {
 // be used together with Context.
 func (e *ExpectedPing) WillDelayFor(duration time.Duration) *ExpectedPing {
 	e.delay = duration
+
 	return e
 }
 
 // WillReturnError allows to set an error for expected database ping
 func (e *ExpectedPing) WillReturnError(err error) *ExpectedPing {
 	e.err = err
+
 	return e
 }
 
@@ -248,6 +281,7 @@ func (e *ExpectedPing) String() string {
 	if e.err != nil {
 		msg += fmt.Sprintf(", which should return error: %s", e.err)
 	}
+
 	return msg
 }
 
@@ -264,7 +298,7 @@ type ExpectedPrepareBatch struct {
 	sendErr         error
 	closeErr        error
 	mustBeSent      bool
-	wasClosed       bool
+	wasSent         bool
 	delay           time.Duration
 	rows            int
 	isSent          bool
@@ -273,6 +307,7 @@ type ExpectedPrepareBatch struct {
 // WillReturnError allows to set an error for the expected *driver.Conn.PrepareBatch action.
 func (e *ExpectedPrepareBatch) WillReturnError(err error) *ExpectedPrepareBatch {
 	e.err = err
+
 	return e
 }
 
@@ -280,13 +315,15 @@ func (e *ExpectedPrepareBatch) WillReturnError(err error) *ExpectedPrepareBatch 
 // result. May be used together with Context
 func (e *ExpectedPrepareBatch) WillDelayFor(duration time.Duration) *ExpectedPrepareBatch {
 	e.delay = duration
+
 	return e
 }
 
-// WillBeSent expects this prepared batch statement to
-// be set with sent.
+// WillBeSent expects Send() to be called successfully on this
+// prepared batch statement; checked by ExpectationsWereMet.
 func (e *ExpectedPrepareBatch) WillBeSent() *ExpectedPrepareBatch {
 	e.mustBeSent = true
+
 	return e
 }
 
@@ -294,6 +331,7 @@ func (e *ExpectedPrepareBatch) WillBeSent() *ExpectedPrepareBatch {
 // be set with rows.
 func (e *ExpectedPrepareBatch) WillReturnRows(rows int) *ExpectedPrepareBatch {
 	e.rows = rows
+
 	return e
 }
 
@@ -307,6 +345,7 @@ type ExpectedAbort struct {
 func (e *ExpectedAbort) WillReturnError(err error) *ExpectedAbort {
 	e.expBatch.abortErr = err
 	e.err = err
+
 	return e
 }
 
@@ -320,6 +359,7 @@ func (e *ExpectedPrepareBatch) ExpectAbort() *ExpectedAbort {
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)
+
 	return eq
 }
 
@@ -333,6 +373,7 @@ type ExpectedAppend struct {
 func (e *ExpectedAppend) WillReturnError(err error) *ExpectedAppend {
 	e.err = err
 	e.expBatch.appendErr = err
+
 	return e
 }
 
@@ -347,6 +388,7 @@ func (e *ExpectedPrepareBatch) ExpectAppend() *ExpectedAppend {
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)
+
 	return eq
 }
 
@@ -360,6 +402,7 @@ type ExpectedAppendStruct struct {
 func (e *ExpectedAppendStruct) WillReturnError(err error) *ExpectedAppendStruct {
 	e.err = err
 	e.expBatch.appendStructErr = err
+
 	return e
 }
 
@@ -373,6 +416,7 @@ func (e *ExpectedPrepareBatch) ExpectAppendStruct() *ExpectedAppendStruct {
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)
+
 	return eq
 }
 
@@ -386,6 +430,7 @@ type ExpectedColumn struct {
 // WillReturnBatchColumn allows to set an error for the expected *batch.Column action.
 func (e *ExpectedColumn) WillReturnBatchColumn(batchcolumn clikhouseDriver.BatchColumn) *ExpectedColumn {
 	e.batchCoulmn = batchcolumn
+
 	return e
 }
 
@@ -399,6 +444,7 @@ func (e *ExpectedPrepareBatch) ExpectColumn() *ExpectedColumn {
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)
+
 	return eq
 }
 
@@ -412,6 +458,7 @@ type ExpectedFlush struct {
 func (e *ExpectedFlush) WillReturnError(err error) *ExpectedFlush {
 	e.err = err
 	e.expBatch.flushErr = err
+
 	return e
 }
 
@@ -425,6 +472,7 @@ func (e *ExpectedPrepareBatch) ExpectFlush() *ExpectedFlush {
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)
+
 	return eq
 }
 
@@ -438,6 +486,7 @@ type ExpectedSend struct {
 func (e *ExpectedSend) WillReturnError(err error) *ExpectedSend {
 	e.err = err
 	e.expBatch.sendErr = err
+
 	return e
 }
 
@@ -451,6 +500,7 @@ func (e *ExpectedPrepareBatch) ExpectSend() *ExpectedSend {
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)
+
 	return eq
 }
 
@@ -465,7 +515,7 @@ type ExpectedIsSent struct {
 func (e *ExpectedIsSent) WillReturnBool(b bool) *ExpectedIsSent {
 	e.isSent = b
 	e.expBatch.isSent = b
-	e.expBatch.mustBeSent = b
+
 	return e
 }
 
@@ -479,6 +529,7 @@ func (e *ExpectedPrepareBatch) ExpectIsSent() *ExpectedIsSent {
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)
+
 	return eq
 }
 
@@ -492,6 +543,7 @@ type ExpectedBatchClose struct {
 func (e *ExpectedBatchClose) WillReturnError(err error) *ExpectedBatchClose {
 	e.err = err
 	e.expBatch.closeErr = err
+
 	return e
 }
 
@@ -505,7 +557,30 @@ func (e *ExpectedPrepareBatch) ExpectClose() *ExpectedBatchClose {
 	eq.expectSQL = e.expectSQL
 	eq.expBatch = e
 	e.expected = append(e.expected, eq)
+
 	return eq
+}
+
+// unmetError reports an unsent batch or a nested batch expectation that was not matched.
+func (e *ExpectedPrepareBatch) unmetError() error {
+	e.Lock()
+	defer e.Unlock()
+
+	if e.mustBeSent && !e.wasSent {
+		return fmt.Errorf("expected prepared statement to be sent, but it was not: %s", e)
+	}
+
+	for _, ex := range e.expected {
+		ex.Lock()
+		done := ex.fulfilled()
+		ex.Unlock()
+
+		if !done {
+			return fmt.Errorf("there is a remaining batch expectation which was not matched: %s", ex)
+		}
+	}
+
+	return nil
 }
 
 // String returns string representation
@@ -557,6 +632,7 @@ type ExpectedStats struct {
 // WillReturnStats allows to set an error for the expected *Conn.Stats action.
 func (e *ExpectedStats) WillReturnStats(stats clikhouseDriver.Stats) *ExpectedStats {
 	e.stats = stats
+
 	return e
 }
 
@@ -575,18 +651,21 @@ type ExpectedAsyncInsert struct {
 // WillReturnError allows to set an error for the expected *Conn.AsyncInsert action.
 func (e *ExpectedAsyncInsert) WillReturnError(err error) *ExpectedAsyncInsert {
 	e.err = err
+
 	return e
 }
 
 // WillWait allows to set a wait for the expected *Conn.AsyncInsert action.
 func (e *ExpectedAsyncInsert) WillWait() *ExpectedAsyncInsert {
 	e.wait = true
+
 	return e
 }
 
 // WillDelay allows to set a delay for the expected *Conn.AsyncInsert action.
 func (e *ExpectedAsyncInsert) WillDelay(d time.Duration) *ExpectedAsyncInsert {
 	e.delay = d
+
 	return e
 }
 
@@ -595,27 +674,35 @@ func (e *ExpectedAsyncInsert) String() string {
 }
 
 type ExpectedQueryRow struct {
-	commonExpectation
-	expectSQL string
-	row       *Row
-	delay     time.Duration
+	queryBasedExpectation
+	row   *Row
+	delay time.Duration
+}
+
+// WithArgs will match given expected args to actual QueryRow arguments.
+func (e *ExpectedQueryRow) WithArgs(args ...any) *ExpectedQueryRow {
+	e.setArgs(args)
+
+	return e
 }
 
 // WillReturnRow allows to set a row for the expected *Conn.QueryRow action.
 func (e *ExpectedQueryRow) WillReturnRow(row *Row) *ExpectedQueryRow {
 	e.row = row
+
 	return e
 }
 
 func (e *ExpectedQueryRow) WillReturnError(err error) *ExpectedQueryRow {
-	e.row.err = err
 	e.err = err
+
 	return e
 }
 
 // WillDelay allows to set a delay for the expected *Conn.QueryRow action.
 func (e *ExpectedQueryRow) WillDelay(d time.Duration) *ExpectedQueryRow {
 	e.delay = d
+
 	return e
 }
 
@@ -624,26 +711,35 @@ func (e *ExpectedQueryRow) String() string {
 }
 
 type ExpectedSelect struct {
-	commonExpectation
-	expectSQL string
-	delay     time.Duration
-	rows      *Rows
+	queryBasedExpectation
+	delay time.Duration
+	rows  *Rows
+}
+
+// WithArgs will match given expected args to actual Select arguments.
+func (e *ExpectedSelect) WithArgs(args ...any) *ExpectedSelect {
+	e.setArgs(args)
+
+	return e
 }
 
 func (e *ExpectedSelect) WillReturnRows(rows *Rows) *ExpectedSelect {
 	e.rows = rows
+
 	return e
 }
 
 // WillReturnError allows to set an error for the expected *Conn.Select action.
 func (e *ExpectedSelect) WillReturnError(err error) *ExpectedSelect {
 	e.err = err
+
 	return e
 }
 
 // WillDelay allows to set a delay for the expected *Conn.Select action.
 func (e *ExpectedSelect) WillDelay(d time.Duration) *ExpectedSelect {
 	e.delay = d
+
 	return e
 }
 
@@ -659,6 +755,7 @@ type ExpectedServerVersion struct {
 // WillReturnVersion allows to set an error for the expected *Conn.ServerVersion action.
 func (e *ExpectedServerVersion) WillReturnVersion(version proto.ServerHandshake) *ExpectedServerVersion {
 	e.version = version
+
 	return e
 }
 
@@ -674,6 +771,7 @@ type ExpectedContributors struct {
 // WillReturnContributors allows to set an error for the expected *Conn.Contributors action.
 func (e *ExpectedContributors) WillReturnContributors(contributors ...string) *ExpectedContributors {
 	e.contributors = contributors
+
 	return e
 }
 

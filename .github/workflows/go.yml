@@ -5,24 +5,41 @@ name: Go
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "**" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "**" ]
+  workflow_dispatch:
 
 jobs:
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    permissions:
+      # lets go-test-coverage commit the coverage badge to the badges branch
+      contents: write
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v7
       with:
-        go-version: '1.23.0'
+        go-version-file: go.mod
+
+    - name: Lint
+      uses: golangci/golangci-lint-action@v9
+      with:
+        version: v2.10.0
 
     - name: Build
       run: go build -v ./...
 
     - name: Test
-      run: go test -v ./...
+      run: go test -race -v -coverprofile=./cover.out -covermode=atomic -coverpkg=./... ./...
+
+    - name: Check test coverage
+      uses: vladopajic/go-test-coverage@v2
+      with:
+        config: ./.testcoverage.yml
+        # badge is committed to the orphan `badges` branch on pushes to main only
+        git-token: ${{ github.event_name == 'push' && github.ref_name == 'main' && secrets.GITHUB_TOKEN || '' }}
+        git-branch: badges

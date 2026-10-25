@@ -39,38 +39,90 @@ func (b batchcolumn) AppendRow(any) error {
 	return b.ex.appendErr
 }
 
+// batchExpectation is a nested expectation of an *ExpectedPrepareBatch.
+type batchExpectation interface {
+	expectation
+	markTriggered()
+}
+
+// triggerNext marks the first unfulfilled batch expectation of type T as triggered.
+func triggerNext[T batchExpectation](ex *ExpectedPrepareBatch) (T, bool) {
+	ex.Lock()
+	defer ex.Unlock()
+
+	for _, e := range ex.expected {
+		t, ok := e.(T)
+		if !ok {
+			continue
+		}
+
+		t.Lock()
+		if !t.fulfilled() {
+			t.markTriggered()
+			t.Unlock()
+
+			return t, true
+		}
+		t.Unlock()
+	}
+
+	var zero T
+
+	return zero, false
+}
+
 func (b *batch) Abort() error {
+	triggerNext[*ExpectedAbort](b.ex)
+
 	return b.ex.abortErr
 }
 
 func (b *batch) Append(v ...any) error {
-	for _, ex := range b.ex.expected {
-		if ap, ok := ex.(*ExpectedAppend); ok && !ap.triggered {
-			ap.triggered = true
-			break
-		}
-	}
+	triggerNext[*ExpectedAppend](b.ex)
+
 	return b.ex.appendErr
 }
 
 func (b *batch) AppendStruct(v any) error {
+	triggerNext[*ExpectedAppendStruct](b.ex)
+
 	return b.ex.appendStructErr
 }
 
 func (b *batch) Column(int) driver.BatchColumn {
+	if ec, ok := triggerNext[*ExpectedColumn](b.ex); ok && ec.batchCoulmn != nil {
+		return ec.batchCoulmn
+	}
+
 	return batchcolumn{conn: b.conn, ex: b.ex, query: b.query}
 }
 
 func (b *batch) Flush() error {
+	triggerNext[*ExpectedFlush](b.ex)
+
 	return b.ex.flushErr
 }
 
 func (b *batch) Send() error {
+	triggerNext[*ExpectedSend](b.ex)
+
+	b.ex.Lock()
+	defer b.ex.Unlock()
+
+	if b.ex.sendErr == nil {
+		b.ex.wasSent = true
+	}
+
 	return b.ex.sendErr
 }
 
 func (b *batch) IsSent() bool {
-	return b.ex.mustBeSent
+	triggerNext[*ExpectedIsSent](b.ex)
+
+	b.ex.Lock()
+	defer b.ex.Unlock()
+
+	return b.ex.wasSent || b.ex.isSent
 }
 
 func (b *batch) Rows() int {
@@ -82,5 +134,7 @@ func (b *batch) Columns() []column.Interface {
 }
 
 func (b *batch) Close() error {
+	triggerNext[*ExpectedBatchClose](b.ex)
+
 	return b.ex.closeErr
 }
